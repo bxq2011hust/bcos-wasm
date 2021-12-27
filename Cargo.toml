@@ -1,0 +1,25 @@
+[package]
+name = "fbwasm"
+version = "0.1.0"
+edition = "2018"
+build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["staticlib"]
+bench = false
+
+[build-dependencies]
+cbindgen = "0.20"
+
+[dependencies]
+log = "0.4"
+hex = "0.4"
+rust-crypto = "0.2"
+# env_logger = "0.9"
+wasmtime = "0.32.0"
+futures = "0.3"
+evmc-declare = { git = "https://github.com/FISCO-BCOS/evmc", rev = "5080584aed210b2fb9c8cef67677a2c78beeda98"}
+evmc-vm = { git = "https://github.com/FISCO-BCOS/evmc", rev = "5080584aed210b2fb9c8cef67677a2c78beeda98"}
+# evmc-sys = { git = "https://github.com/FISCO-BCOS/evmc", rev = "2e8bc3a6fc9c3cdbf5440b329dcdf0753faee43c"}
