@@ -6,9 +6,6 @@ use std::cell::RefCell;
 use std::{
     error,
     fmt,
-    // panic::UnwindSafe,
-    // rc::Weak,
-    // sync::{Arc, Mutex},
 };
 
 use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
