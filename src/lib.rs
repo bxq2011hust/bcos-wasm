@@ -40,7 +40,7 @@ fn has_wasm_preamble(data: &[u8]) -> bool {
 }
 
 fn has_wasm_version(data: &[u8], version: u8) -> bool {
-    data.len() >= 8 && data[4..8] == [0x01, 0x00, 0x00, 0x00] && data[8..12] == [version, 0, 0, 0]
+    data.len() >= 8 && data[4..8] == [version, 0x00, 0x00, 0x00]
 }
 
 fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
