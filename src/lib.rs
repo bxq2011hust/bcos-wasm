@@ -287,7 +287,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
         .func_wrap(
             BCOS_MODULE_NAME,
             "call",
-            |caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
+            |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
              address_offset: u32,
              address_size: u32,
              data_offset: u32,
@@ -295,7 +295,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
                 let env_interface = caller.data().clone();
                 let mut env = env_interface.lock().unwrap();
                 match env.call(
-                    &caller,
+                    &mut caller,
                     address_offset,
                     address_size,
                     data_offset,

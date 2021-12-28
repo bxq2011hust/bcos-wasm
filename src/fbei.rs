@@ -1,7 +1,8 @@
 use crypto::{digest::Digest, sha3::Sha3};
-use evmc_vm::{Bytes32, StorageStatus};
+use evmc_vm::{
+    Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256,
+};
 use std::cell::RefCell;
-use std::convert::TryInto;
 use std::{
     error,
     fmt,
@@ -33,6 +34,7 @@ pub enum ExecuteError {
     OutOfGas(String),
     InvalidParameter(String),
     VMInternalError(String),
+    InvalidReturnStatus(i32),
 }
 
 impl fmt::Display for ExecuteError {
@@ -43,6 +45,7 @@ impl fmt::Display for ExecuteError {
             // via the source() method.
             ExecuteError::InvalidParameter(message) => write!(f, "InvalidParameter, {}", message),
             ExecuteError::VMInternalError(message) => write!(f, "VMInternalError, {}", message),
+            ExecuteError::InvalidReturnStatus(code) => write!(f, "InvalidReturnStatus, {}", code),
         }
     }
 }
@@ -112,7 +115,9 @@ impl<'a> EnvironmentInterface<'a> {
         caller: &str,
     ) -> Result<(), ExecuteError> {
         match &self.wasm_memory {
-            Some(wasm_memory) => wasm_memory_read(wasm_memory, &store, offset as usize, buffer, caller),
+            Some(wasm_memory) => {
+                wasm_memory_read(wasm_memory, &store, offset as usize, buffer, caller)
+            }
             None => Err(ExecuteError::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
@@ -127,11 +132,7 @@ impl<'a> EnvironmentInterface<'a> {
         caller: &str,
     ) -> Result<(), ExecuteError> {
         match &self.wasm_memory {
-            Some(wasm_memory) => match wasm_memory.write(
-                &mut store,
-                offset as usize,
-                buffer,
-            ) {
+            Some(wasm_memory) => match wasm_memory.write(&mut store, offset as usize, buffer) {
                 Ok(_) => Ok(()),
                 Err(_) => Err(ExecuteError::InvalidParameter(format!(
                     "wasm_memory.write failed, caller: {}",
@@ -149,6 +150,24 @@ impl<'a> EnvironmentInterface<'a> {
             let remain = gas_left.borrow().get(&mut store).i64().unwrap() - gas;
             if remain <= 0 {
                 return Err(ExecuteError::OutOfGas(String::from("call takeGas")));
+            }
+            gas_left
+                .borrow_mut()
+                .set(&mut store, Val::I64(remain))
+                .unwrap();
+            return Ok(());
+        } else {
+            return Err(ExecuteError::VMInternalError(String::from(
+                "the global gas var is not init",
+            )));
+        }
+    }
+
+    fn add_gas(&self, mut store: impl AsContextMut, gas: i64) -> Result<(), ExecuteError> {
+        if let Some(gas_left) = &self.gas_left {
+            let remain = gas_left.borrow().get(&mut store).i64().unwrap() + gas;
+            if remain <= 0 {
+                return Err(ExecuteError::OutOfGas(String::from("call add_gas")));
             }
             gas_left
                 .borrow_mut()
@@ -203,7 +222,9 @@ impl<'a> EnvironmentInterface<'a> {
         let buffer = self.output.as_mut_slice();
         let caller = "finish";
         match &self.wasm_memory {
-            Some(wasm_memory) => wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller),
+            Some(wasm_memory) => {
+                wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
+            }
             None => Err(ExecuteError::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
@@ -221,7 +242,9 @@ impl<'a> EnvironmentInterface<'a> {
         let buffer = self.output.as_mut_slice();
         let caller = "revert";
         match &self.wasm_memory {
-            Some(wasm_memory) => wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller),
+            Some(wasm_memory) => {
+                wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
+            }
             None => Err(ExecuteError::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
@@ -326,7 +349,7 @@ impl<'a> EnvironmentInterface<'a> {
             value_offset as usize,
             value.as_mut_slice(),
             "get_storage",
-        ){
+        ) {
             Ok(()) => Ok(value_len),
             Err(e) => Err(e),
         }
@@ -438,17 +461,65 @@ impl<'a> EnvironmentInterface<'a> {
     }
     pub fn call(
         &mut self,
-        store: impl AsContext,
+        mut store: impl AsContextMut,
         address_offset: u32,
         address_size: u32,
         data_offset: u32,
         data_size: u32,
     ) -> Result<i32, ExecuteError> {
-        println!(
-            "call: {} {} {} {}",
-            address_offset, address_size, data_offset, data_size
+        let gas_left = self.get_gas_left(&mut store)?;
+        let mut address: Vec<u8> = vec![0u8; address_size as usize];
+        self.read_wasm_memory(
+            &store,
+            address_offset as usize,
+            address.as_mut_slice(),
+            "call",
+        )?;
+        let mut calldata: Vec<u8> = vec![0u8; data_size as usize];
+        self.read_wasm_memory(
+            &store,
+            data_offset as usize,
+            calldata.as_mut_slice(),
+            "call",
+        )?;
+        let flags = self.message.flags() & MessageFlags::EVMC_STATIC as u32;
+        let message = ExecutionMessage::new(
+            MessageKind::EVMC_CALL,
+            flags,
+            self.message.depth() + 1,
+            gas_left,
+            address,
+            self.message.destination().clone(),
+            {
+                if data_size > 0 {
+                    Some(calldata)
+                } else {
+                    None
+                }
+            },
+            Uint256 { bytes: [0u8; 32] },
+            Bytes32::default(),
         );
-        todo!()
+        self.take_gas(&mut store, gas_left)?;
+        let result = self.host_context.call(&message);
+        match result.output() {
+            Some(output) => {
+                self.last_call_return_data = output.clone();
+            }
+            None => {
+                self.last_call_return_data.clear();
+            }
+        };
+        // return gas
+        let unused_gas = result.gas_left();
+        self.add_gas(&mut store, unused_gas)?;
+        // check status
+        match result.status_code() {
+            StatusCode::EVMC_SUCCESS => Ok(0),
+            StatusCode::EVMC_REVERT => Ok(2),
+            StatusCode::EVMC_FAILURE => Ok(1),
+            _ => Err(ExecuteError::InvalidReturnStatus(result.status_code() as i32)),
+        }
     }
 }
 
