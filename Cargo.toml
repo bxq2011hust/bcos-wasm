@@ -20,6 +20,6 @@ rust-crypto = "0.2"
 # env_logger = "0.9"
 wasmtime = "0.32.0"
 futures = "0.3"
-evmc-declare = { git = "https://github.com/FISCO-BCOS/evmc", rev = "5ff2c2628b2aa83ef5ba50a1d265e285981c9e82"}
-evmc-vm = { git = "https://github.com/FISCO-BCOS/evmc", rev = "5ff2c2628b2aa83ef5ba50a1d265e285981c9e82"}
+evmc-declare = { git = "https://github.com/FISCO-BCOS/evmc", rev = "83adbb6276fa2bc444e43f79668b110192ace2ee"}
+evmc-vm = { git = "https://github.com/FISCO-BCOS/evmc", rev = "83adbb6276fa2bc444e43f79668b110192ace2ee"}
 # evmc-sys = { git = "https://github.com/FISCO-BCOS/evmc", rev = "2e8bc3a6fc9c3cdbf5440b329dcdf0753faee43c"}
