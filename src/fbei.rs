@@ -3,10 +3,7 @@ use evmc_vm::{
 };
 use sha3::Digest;
 use std::cell::RefCell;
-use std::{
-    error,
-    fmt,
-};
+use std::{error, fmt};
 
 use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
 
@@ -267,9 +264,7 @@ impl<'a> EnvironmentInterface<'a> {
     pub fn get_call_data_size(&self) -> Result<i32, ExecuteError> {
         match self.message.input() {
             Some(input) => Ok(input.len() as i32),
-            None => Err(ExecuteError::InvalidParameter(String::from(
-                "get_call_data_size failed, input is null",
-            ))),
+            None => Ok(0),
         }
     }
     pub fn get_call_data(
@@ -514,7 +509,9 @@ impl<'a> EnvironmentInterface<'a> {
             StatusCode::EVMC_SUCCESS => Ok(0),
             StatusCode::EVMC_REVERT => Ok(2),
             StatusCode::EVMC_FAILURE => Ok(1),
-            _ => Err(ExecuteError::InvalidReturnStatus(result.status_code() as i32)),
+            _ => Err(ExecuteError::InvalidReturnStatus(
+                result.status_code() as i32
+            )),
         }
     }
 }
