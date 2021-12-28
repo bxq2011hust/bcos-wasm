@@ -1,7 +1,8 @@
 use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
 // use futures::executor::block_on;
 use std::sync::Once;
-use tokio::runtime::Runtime;
+use async_std::task;
+// use tokio::runtime::Handle;
 // use log::{debug, error, info, log_enabled, Level};
 use std::sync::{Arc, Mutex};
 use wasmtime::{
@@ -447,7 +448,7 @@ impl evmc_vm::EvmcVm for FbWasm {
             }
         }
         let mut call_name = String::from("main");
-        let runtime = Runtime::new().unwrap();
+        // let runtime = Runtime::new().unwrap();
         if message.kind() == evmc_call_kind::EVMC_CREATE {
             call_name = String::from("deploy");
 
@@ -465,7 +466,7 @@ impl evmc_vm::EvmcVm for FbWasm {
             };
             // all wasm function need call_async because the coroutine
             let future = func.call_async(&mut store, ());
-            let code_sm_crypto = match runtime.block_on(future) {
+            let code_sm_crypto = match task::block_on(future) {
                 Ok(ret) => match ret {
                     1 => true,
                     _ => false,
@@ -507,7 +508,7 @@ impl evmc_vm::EvmcVm for FbWasm {
             }
         };
         let future = func.call_async(&mut store, ());
-        match runtime.block_on(future) {
+        match task::block_on(future) {
             Ok(ret) => ret,
             Err(e) => {
                 error!("Failed to call {} function: {}", call_name, e);
