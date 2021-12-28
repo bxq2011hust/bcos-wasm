@@ -1,19 +1,34 @@
 use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
 use futures::executor::block_on;
-use log::{debug, error, info, log_enabled, Level};
-use std::{
-    sync::{Arc, Mutex},
-};
+use std::sync::Once;
+// use log::{debug, error, info, log_enabled, Level};
+use std::sync::{Arc, Mutex};
 use wasmtime::{
-    Caller, Config, Engine, Global, GlobalType, Linker, Module,
-    Mutability, Store, Trap, Val, ValType,
+    Caller, Config, Engine, Global, GlobalType, Linker, Module, Mutability, Store, Trap, Val,
+    ValType,
 };
 
 mod fbei;
 use fbei::EnvironmentInterface;
+use lazy_static::lazy_static;
+use log::{debug, error, info, log_enabled, Level};
 
-// env_logger::init();
-
+static START: Once = Once::new();
+lazy_static! {
+    static ref WASMTIME_ENGINE: Engine = {
+        let mut config = Config::new();
+        config
+            .async_support(true)
+            .cache_config_load_default()
+            .unwrap();
+        match Engine::new(&config) {
+            Ok(engine) => engine,
+            Err(e) => {
+                panic!("Failed to create wasmtime engine: {}", e);
+            }
+        }
+    };
+}
 #[evmc_declare::evmc_declare_vm("fbwasm", "fbwasm", "1.0.0-rc1")]
 pub struct FbWasm;
 
@@ -28,7 +43,7 @@ fn has_wasm_version(data: &[u8], version: u8) -> bool {
     data.len() >= 8 && data[4..8] == [0x01, 0x00, 0x00, 0x00] && data[8..12] == [version, 0, 0, 0]
 }
 
-fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_left: Global) {
+fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
     linker
         .func_wrap(
             BCOS_MODULE_NAME,
@@ -55,8 +70,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
              data_size: u32| {
                 let env_interface = caller.data().clone();
                 let mut env = env_interface.lock().unwrap();
-                match env.revert(&caller, data_offset, data_size)
-                {
+                match env.revert(&caller, data_offset, data_size) {
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
                     }
@@ -71,8 +85,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
             |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>, result_offset: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_address(&mut caller, result_offset)
-                {
+                match env.get_address(&mut caller, result_offset) {
                     Ok(len) => Ok(len),
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
@@ -120,13 +133,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
              value_size: u32| {
                 let env_interface = caller.data().clone();
                 let mut env = env_interface.lock().unwrap();
-                match env.set_storage(
-                    &caller,
-                    key_offset,
-                    key_size,
-                    value_offset,
-                    value_size,
-                ) {
+                match env.set_storage(&caller, key_offset, key_size, value_offset, value_size) {
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
                     }
@@ -145,13 +152,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
              value_size: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_storage(
-                    &mut caller,
-                    key_offset,
-                    key_size,
-                    value_offset,
-                    value_size,
-                ) {
+                match env.get_storage(&mut caller, key_offset, key_size, value_offset, value_size) {
                     Ok(len) => Ok(len),
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
@@ -166,8 +167,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
             |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>, result_offset: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_caller(&mut caller, result_offset)
-                {
+                match env.get_caller(&mut caller, result_offset) {
                     Ok(len) => Ok(len),
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
@@ -182,8 +182,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
             |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>, result_offset: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_tx_origin(&mut caller, result_offset)
-                {
+                match env.get_tx_origin(&mut caller, result_offset) {
                     Ok(len) => Ok(len),
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
@@ -200,8 +199,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
              size: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_code_size(&caller, address_offset, size)
-                {
+                match env.get_code_size(&caller, address_offset, size) {
                     Ok(len) => Ok(len),
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
@@ -274,8 +272,7 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
             |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>, result_offset: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_return_data(&mut caller, result_offset)
-                {
+                match env.get_return_data(&mut caller, result_offset) {
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
                     }
@@ -311,8 +308,6 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>, gas_le
                 }
             },
         )
-        .unwrap()
-        .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, gas_left)
         .unwrap();
 }
 
@@ -332,6 +327,10 @@ impl evmc_vm::EvmcVm for FbWasm {
         message: &'a evmc_vm::ExecutionMessage,
         context: Option<&'a mut evmc_vm::ExecutionContext<'a>>,
     ) -> evmc_vm::ExecutionResult {
+        START.call_once(|| {
+            info!("fbwasm start");
+            env_logger::init();
+        });
         let context = match context {
             Some(c) => c,
             None => {
@@ -364,23 +363,23 @@ impl evmc_vm::EvmcVm for FbWasm {
         //let my_address = message.destination();
 
         let env_interface = Arc::new(Mutex::new(EnvironmentInterface::new(context, message)));
-        let mut config = Config::new();
-        config
-            .async_support(true)
-            .cache_config_load_default()
-            .unwrap();
-        let engine = match Engine::new(&config) {
-            Ok(engine) => engine,
-            Err(e) => {
-                error!("Failed to create wasmtime engine: {}", e);
-                return evmc_vm::ExecutionResult::new(
-                    evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
-                    0,
-                    None,
-                );
-            }
-        };
-        let module = match Module::from_binary(&engine, code) {
+        // let mut config = Config::new();
+        // config
+        //     .async_support(true)
+        //     .cache_config_load_default()
+        //     .unwrap();
+        // let engine = match Engine::new(&WASMTIME_CONFIG) {
+        //     Ok(engine) => engine,
+        //     Err(e) => {
+        //         error!("Failed to create wasmtime engine: {}", e);
+        //         return evmc_vm::ExecutionResult::new(
+        //             evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+        //             0,
+        //             None,
+        //         );
+        //     }
+        // };
+        let module = match Module::from_binary(&WASMTIME_ENGINE, code) {
             Ok(module) => module,
             Err(e) => {
                 error!("Failed to create wasmtime engine: {}", e);
@@ -392,16 +391,20 @@ impl evmc_vm::EvmcVm for FbWasm {
             }
         };
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
-            Store::new(&engine, env_interface.clone());
+            Store::new(&WASMTIME_ENGINE, env_interface.clone());
         // let store_context = store.as_context_mut();
-        let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&engine);
+        let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
         let global_gas = Global::new(&mut store, ty, Val::I64(message.gas())).unwrap();
         env_interface
             .lock()
             .unwrap()
             .set_gas_global(global_gas.clone());
-        prepare_imports(&mut linker, global_gas);
+        prepare_imports(&mut linker);
+        // TODO: because the global owned by store is defined, the linker can not used to instantiate many modules
+        linker
+            .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
+            .unwrap();
         let instance = match linker.instantiate(&mut store, &module) {
             Ok(instance) => instance,
             Err(e) => {
