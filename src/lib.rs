@@ -308,6 +308,10 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
                 }
             },
         )
+        .unwrap()
+        .func_wrap(BCOS_MODULE_NAME, "outOfGas", || -> Result<(), Trap> {
+            Err(Trap::new("Out Of Gas"))
+        })
         .unwrap();
 }
 
