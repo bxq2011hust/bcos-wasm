@@ -148,8 +148,8 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
             |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
              key_offset: u32,
              key_size: u32,
-             value_offset: u32,
-             value_size: u32| {
+             value_offset: u32| {
+                let value_size = 16 * 1024;
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
                 match env.get_storage(&mut caller, key_offset, key_size, value_offset, value_size) {
