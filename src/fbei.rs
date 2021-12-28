@@ -1,7 +1,7 @@
-use crypto::{digest::Digest, sha3::Sha3};
 use evmc_vm::{
     Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256,
 };
+use sha3::Digest;
 use std::cell::RefCell;
 use std::{
     error,
@@ -191,9 +191,8 @@ impl<'a> EnvironmentInterface<'a> {
                 .bytes
             });
         } else {
-            let mut hasher = Sha3::keccak256();
-            hasher.input(hex_address.as_bytes());
-            hash = hasher.result_str();
+            // let mut hasher = sha3::Keccak256::default();
+            hash = hex::encode(sha3::Keccak256::digest(hex_address.as_bytes()));
         }
         for (i, c) in hex_address.as_str().char_indices() {
             let v = u16::from_str_radix(&hash[i..i + 1], 16).unwrap();
@@ -526,9 +525,7 @@ mod test {
     fn checksum_address(bytes: &[u8]) -> [u8; 40] {
         let mut result = [0u8; 40];
         let hex_address = hex::encode(bytes).to_lowercase();
-        let mut hasher = Sha3::keccak256();
-        hasher.input(hex_address.as_bytes());
-        let hash = hasher.result_str();
+        let hash = hex::encode(sha3::Keccak256::digest(hex_address.as_bytes()));
         for (i, c) in hex_address.as_str().char_indices() {
             let v = u16::from_str_radix(&hash[i..i + 1], 16).unwrap();
             if v >= 8 {
