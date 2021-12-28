@@ -23,3 +23,6 @@ futures = "0.3"
 evmc-declare = { git = "https://github.com/FISCO-BCOS/evmc", rev = "83adbb6276fa2bc444e43f79668b110192ace2ee"}
 evmc-vm = { git = "https://github.com/FISCO-BCOS/evmc", rev = "83adbb6276fa2bc444e43f79668b110192ace2ee"}
 # evmc-sys = { git = "https://github.com/FISCO-BCOS/evmc", rev = "2e8bc3a6fc9c3cdbf5440b329dcdf0753faee43c"}
+
+[profile.release]
+lto=false
