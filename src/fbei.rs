@@ -145,7 +145,7 @@ impl<'a> EnvironmentInterface<'a> {
     fn take_gas(&self, mut store: impl AsContextMut, gas: i64) -> Result<(), ExecuteError> {
         if let Some(gas_left) = &self.gas_left {
             let remain = gas_left.borrow().get(&mut store).i64().unwrap() - gas;
-            if remain <= 0 {
+            if remain < 0 {
                 return Err(ExecuteError::OutOfGas(String::from("call takeGas")));
             }
             gas_left
