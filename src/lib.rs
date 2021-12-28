@@ -450,7 +450,7 @@ impl evmc_vm::EvmcVm for FbWasm {
             call_name = String::from("deploy");
 
             // call hash function of wasm module
-            let func = match instance.get_typed_func::<(), i32, _>(&mut store, "hash") {
+            let func = match instance.get_typed_func::<(), i32, _>(&mut store, "hash_type") {
                 Ok(func) => func,
                 Err(e) => {
                     error!("Failed to get hash function: {}", e);
