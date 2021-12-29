@@ -4,7 +4,7 @@ use evmc_vm::{
 use sha3::Digest;
 use std::cell::RefCell;
 use std::{error, fmt};
-
+use log::{debug};
 use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
 
 pub struct EnvironmentInterface<'a> {
@@ -279,9 +279,10 @@ impl<'a> EnvironmentInterface<'a> {
                 input.as_slice(),
                 "get_call_data",
             ),
-            None => Err(ExecuteError::InvalidParameter(String::from(
-                "get_call_data failed, input is null",
-            ))),
+            None => {
+                debug!("call get_call_data without input");
+                Ok(())
+            }
         }
     }
     // fn create(&mut self, data_offset: u32, size : u32, result_offset: u32)-> Result<i32, ExecuteError>;
