@@ -1,10 +1,9 @@
 use evmc_vm::{
     Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256,
 };
+use log::{debug, log_enabled, Level};
 use sha3::Digest;
-use std::cell::RefCell;
-use std::{error, fmt};
-use log::{debug};
+use std::{cell::RefCell, error, fmt};
 use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
 
 pub struct EnvironmentInterface<'a> {
@@ -21,8 +20,6 @@ unsafe impl Send for EnvironmentInterface<'_> {}
 
 unsafe impl Sync for EnvironmentInterface<'_> {}
 
-// impl UnwindSafe for EnvironmentInterface<'_> {}
-
 #[derive(Debug, Clone)]
 pub enum ExecuteError {
     OutOfGas(String),
@@ -35,8 +32,6 @@ impl fmt::Display for ExecuteError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ExecuteError::OutOfGas(message) => write!(f, "out of gas, {}", message),
-            // The wrapped error contains additional information and is available
-            // via the source() method.
             ExecuteError::InvalidParameter(message) => write!(f, "InvalidParameter, {}", message),
             ExecuteError::VMInternalError(message) => write!(f, "VMInternalError, {}", message),
             ExecuteError::InvalidReturnStatus(code) => write!(f, "InvalidReturnStatus, {}", code),
@@ -45,6 +40,21 @@ impl fmt::Display for ExecuteError {
 }
 
 impl error::Error for ExecuteError {}
+
+struct GasSchedule;
+
+impl GasSchedule {
+    const STORAGE_LOAD: i64 = 200;
+    // const STORAGE_STORE_CREATE :i64 = 20000;
+    const STORAGE_STORE_CHANGE: i64 = 5000;
+    const LOG: i64 = 375;
+    const LOG_DATA: i64 = 8;
+    const LOG_TOPIC: i64 = 375;
+    // const CREATE: i64 = 32000;
+    const CALL: i64 = 700;
+    const VERY_LOW: i64 = 3;
+    const EXTERNAL_CODE: i64 = 700;
+}
 
 fn wasm_memory_read(
     wasm_memory: &Memory,
@@ -100,16 +110,51 @@ impl<'a> EnvironmentInterface<'a> {
     pub fn get_output(&self) -> &[u8] {
         &self.output
     }
+    #[inline]
+    fn wasm_memory_size(&self, store: impl AsContext) -> Result<usize, ExecuteError> {
+        if let Some(wasm_memory) = &self.wasm_memory {
+            Ok(wasm_memory.size(&store) as usize)
+        } else {
+            Err(ExecuteError::VMInternalError(String::from(
+                "wasm_memory is not set",
+            )))
+        }
+    }
+    #[inline]
+    fn check_memory_bounds(
+        &self,
+        store: impl AsContext,
+        offset: u32,
+        size: u32,
+    ) -> Result<(), ExecuteError> {
+        let end = offset + size;
+        if end < offset {
+            return Err(ExecuteError::InvalidParameter(format!(
+                "offset + size overflows, offset: {}, size: {}",
+                offset, size
+            )));
+        }
+        let wasm_memory_size = self.wasm_memory_size(store)?;
+        if end as usize > wasm_memory_size {
+            Err(ExecuteError::InvalidParameter(format!(
+                "offset + size > wasm_memory_size, offset: {}, size: {}, wasm_memory_size: {}",
+                offset, size, wasm_memory_size
+            )))
+        } else {
+            Ok(())
+        }
+    }
 
     fn read_wasm_memory(
         &self,
-        store: impl AsContext,
+        mut store: impl AsContextMut,
         offset: usize,
         buffer: &mut [u8],
         caller: &str,
     ) -> Result<(), ExecuteError> {
         match &self.wasm_memory {
             Some(wasm_memory) => {
+                self.take_gas(&mut store, GasSchedule::VERY_LOW * buffer.len() as i64)?;
                 wasm_memory_read(wasm_memory, &store, offset as usize, buffer, caller)
             }
             None => Err(ExecuteError::VMInternalError(format!(
@@ -126,13 +171,16 @@ impl<'a> EnvironmentInterface<'a> {
         caller: &str,
     ) -> Result<(), ExecuteError> {
         match &self.wasm_memory {
-            Some(wasm_memory) => match wasm_memory.write(&mut store, offset as usize, buffer) {
-                Ok(_) => Ok(()),
-                Err(_) => Err(ExecuteError::InvalidParameter(format!(
-                    "wasm_memory.write failed, caller: {}",
-                    caller
-                ))),
-            },
+            Some(wasm_memory) => {
+                self.take_gas(&mut store, GasSchedule::VERY_LOW * buffer.len() as i64)?;
+                match wasm_memory.write(&mut store, offset as usize, buffer) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(ExecuteError::InvalidParameter(format!(
+                        "wasm_memory.write failed, caller: {}",
+                        caller
+                    ))),
+                }
+            }
             None => Err(ExecuteError::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
@@ -188,7 +236,6 @@ impl<'a> EnvironmentInterface<'a> {
                 .bytes
             });
         } else {
-            // let mut hasher = sha3::Keccak256::default();
             hash = hex::encode(sha3::Keccak256::digest(hex_address.as_bytes()));
         }
         for (i, c) in hex_address.as_str().char_indices() {
@@ -201,9 +248,6 @@ impl<'a> EnvironmentInterface<'a> {
         }
         result
     }
-    // pub fn use_gas(&mut self, gas: i64){
-    //     println!("use_gas: {}", gas);
-    // }
     pub fn finish(
         &mut self,
         store: impl AsContext,
@@ -253,6 +297,11 @@ impl<'a> EnvironmentInterface<'a> {
         mut store: impl AsContextMut,
         result_offset: u32,
     ) -> Result<i32, ExecuteError> {
+        self.check_memory_bounds(
+            &store,
+            result_offset,
+            self.message.destination().len() as u32,
+        )?;
         self.write_wasm_memory(
             &mut store,
             result_offset as usize,
@@ -273,37 +322,44 @@ impl<'a> EnvironmentInterface<'a> {
         result_offset: u32,
     ) -> Result<(), ExecuteError> {
         match self.message.input() {
-            Some(input) => self.write_wasm_memory(
-                &mut store,
-                result_offset as usize,
-                input.as_slice(),
-                "get_call_data",
-            ),
+            Some(input) => {
+                self.check_memory_bounds(&store, result_offset, input.len() as u32)?;
+                self.write_wasm_memory(
+                    &mut store,
+                    result_offset as usize,
+                    input.as_slice(),
+                    "get_call_data",
+                )
+            }
             None => {
-                debug!("call get_call_data without input");
+                if log_enabled!(Level::Debug) {
+                    debug!("call get_call_data on empty input");
+                }
                 Ok(())
             }
         }
     }
-    // fn create(&mut self, data_offset: u32, size : u32, result_offset: u32)-> Result<i32, ExecuteError>;
     pub fn set_storage(
         &mut self,
-        store: impl AsContext,
+        mut store: impl AsContextMut,
         key_offset: u32,
         key_size: u32,
         value_offset: u32,
         value_size: u32,
     ) -> Result<StorageStatus, ExecuteError> {
+        self.check_memory_bounds(&store, key_offset, key_size)?;
+        self.check_memory_bounds(&store, value_offset, value_size)?;
+        self.take_gas(&mut store, GasSchedule::STORAGE_STORE_CHANGE)?;
         let mut key = vec![0u8; key_size as usize];
         let mut value: Vec<u8> = vec![0u8; value_size as usize];
         self.read_wasm_memory(
-            &store,
+            &mut store,
             key_offset as usize,
             key.as_mut_slice(),
             "set_storage",
         )?;
         self.read_wasm_memory(
-            &store,
+            &mut store,
             value_offset as usize,
             value.as_mut_slice(),
             "set_storage",
@@ -322,10 +378,13 @@ impl<'a> EnvironmentInterface<'a> {
         value_offset: u32,
         value_size: u32,
     ) -> Result<i32, ExecuteError> {
+        self.check_memory_bounds(&store, key_offset, key_size)?;
+        self.check_memory_bounds(&store, value_offset, value_size)?;
         let mut key = vec![0u8; key_size as usize];
         let mut value: Vec<u8> = vec![0u8; value_size as usize];
+        self.take_gas(&mut store, GasSchedule::STORAGE_LOAD)?;
         self.read_wasm_memory(
-            &store,
+            &mut store,
             key_offset as usize,
             key.as_mut_slice(),
             "get_storage",
@@ -351,7 +410,7 @@ impl<'a> EnvironmentInterface<'a> {
         mut store: impl AsContextMut,
         result_offset: u32,
     ) -> Result<i32, ExecuteError> {
-        println!("get_caller: {}", result_offset);
+        self.check_memory_bounds(&store, result_offset, self.message.sender().len() as u32)?;
         if self.host_context.get_tx_context().tx_origin.bytes == self.message.sender().as_slice() {
             // if caller is account return eip-55 address else return string
             self.get_tx_origin(&mut store, result_offset)
@@ -370,6 +429,7 @@ impl<'a> EnvironmentInterface<'a> {
         mut store: impl AsContextMut,
         result_offset: u32,
     ) -> Result<i32, ExecuteError> {
+        self.check_memory_bounds(&store, result_offset, 40)?;
         // the return is always 40 bytes
         let checksum_address =
             self.checksum_address(&self.host_context.get_tx_context().tx_origin.bytes);
@@ -383,13 +443,15 @@ impl<'a> EnvironmentInterface<'a> {
     }
     pub fn get_code_size(
         &self,
-        store: impl AsContext,
+        mut store: impl AsContextMut,
         address_offset: u32,
         size: u32,
     ) -> Result<i32, ExecuteError> {
+        self.check_memory_bounds(&store, address_offset, size)?;
+        self.take_gas(&mut store, GasSchedule::EXTERNAL_CODE)?;
         let mut address = vec![0u8; size as usize];
         self.read_wasm_memory(
-            &store,
+            &mut store,
             address_offset as usize,
             address.as_mut_slice(),
             "get_code_size",
@@ -404,7 +466,7 @@ impl<'a> EnvironmentInterface<'a> {
     }
     pub fn log(
         &mut self,
-        store: impl AsContext,
+        mut store: impl AsContextMut,
         data_offset: u32,
         data_size: u32,
         number_of_topics: i32,
@@ -413,12 +475,20 @@ impl<'a> EnvironmentInterface<'a> {
         topic3: u32,
         topic4: u32,
     ) -> Result<(), ExecuteError> {
+        self.check_memory_bounds(&store, data_offset, data_size)?;
+        self.check_memory_bounds(&store, topic1, (number_of_topics * 32) as u32)?;
+        self.take_gas(
+            &mut store,
+            GasSchedule::LOG
+                + GasSchedule::LOG_TOPIC * number_of_topics as i64
+                + GasSchedule::LOG_DATA * data_size as i64,
+        )?;
         let mut data = vec![0u8; data_size as usize];
         let mut topics: Vec<Bytes32> = vec![Bytes32::default(); number_of_topics as usize];
-        self.read_wasm_memory(&store, data_offset as usize, data.as_mut_slice(), "log")?;
+        self.read_wasm_memory(&mut store, data_offset as usize, data.as_mut_slice(), "log")?;
         for i in 0..number_of_topics {
             self.read_wasm_memory(
-                &store,
+                &mut store,
                 match i {
                     0 => topic1,
                     1 => topic2,
@@ -444,6 +514,11 @@ impl<'a> EnvironmentInterface<'a> {
         mut store: impl AsContextMut,
         result_offset: u32,
     ) -> Result<(), ExecuteError> {
+        self.check_memory_bounds(
+            &store,
+            result_offset,
+            self.last_call_return_data.len() as u32,
+        )?;
         self.write_wasm_memory(
             &mut store,
             result_offset as usize,
@@ -459,17 +534,20 @@ impl<'a> EnvironmentInterface<'a> {
         data_offset: u32,
         data_size: u32,
     ) -> Result<i32, ExecuteError> {
+        self.check_memory_bounds(&store, address_offset, address_size)?;
+        self.check_memory_bounds(&store, data_offset, data_size)?;
+        self.take_gas(&mut store, GasSchedule::CALL)?;
         let gas_left = self.get_gas_left(&mut store)?;
         let mut address: Vec<u8> = vec![0u8; address_size as usize];
         self.read_wasm_memory(
-            &store,
+            &mut store,
             address_offset as usize,
             address.as_mut_slice(),
             "call",
         )?;
         let mut calldata: Vec<u8> = vec![0u8; data_size as usize];
         self.read_wasm_memory(
-            &store,
+            &mut store,
             data_offset as usize,
             calldata.as_mut_slice(),
             "call",
@@ -502,10 +580,8 @@ impl<'a> EnvironmentInterface<'a> {
                 self.last_call_return_data.clear();
             }
         };
-        // return gas
         let unused_gas = result.gas_left();
         self.add_gas(&mut store, unused_gas)?;
-        // check status
         match result.status_code() {
             StatusCode::EVMC_SUCCESS => Ok(0),
             StatusCode::EVMC_REVERT => Ok(2),

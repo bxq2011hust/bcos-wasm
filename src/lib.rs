@@ -1,19 +1,15 @@
-use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
-// use futures::executor::block_on;
-use std::sync::Once;
+mod fbei;
+
 use async_std::task;
-// use tokio::runtime::Handle;
-// use log::{debug, error, info, log_enabled, Level};
-use std::sync::{Arc, Mutex};
+use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
+use fbei::EnvironmentInterface;
+use lazy_static::lazy_static;
+use log::{debug, error, info, log_enabled, Level};
+use std::sync::{Arc, Mutex, Once};
 use wasmtime::{
     Caller, Config, Engine, Global, GlobalType, Linker, Module, Mutability, Store, Trap, Val,
     ValType,
 };
-
-mod fbei;
-use fbei::EnvironmentInterface;
-use lazy_static::lazy_static;
-use log::{debug, error, info, log_enabled, Level};
 
 static START: Once = Once::new();
 lazy_static! {
@@ -100,7 +96,8 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
             BCOS_MODULE_NAME,
             "getCallDataSize",
             |caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>| {
-                let env = caller.data().lock().unwrap();
+                let env_interface = caller.data().clone();
+                let env = env_interface.lock().unwrap();
                 match env.get_call_data_size() {
                     Ok(len) => Ok(len),
                     Err(e) => {
@@ -128,14 +125,14 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
         .func_wrap(
             BCOS_MODULE_NAME,
             "setStorage",
-            |caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
+            |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
              key_offset: u32,
              key_size: u32,
              value_offset: u32,
              value_size: u32| {
                 let env_interface = caller.data().clone();
                 let mut env = env_interface.lock().unwrap();
-                match env.set_storage(&caller, key_offset, key_size, value_offset, value_size) {
+                match env.set_storage(&mut caller, key_offset, key_size, value_offset, value_size) {
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
                     }
@@ -196,12 +193,12 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
         .func_wrap(
             BCOS_MODULE_NAME,
             "getExternalCodeSize",
-            |caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
+            |mut caller: Caller<'_, Arc<Mutex<EnvironmentInterface>>>,
              address_offset: u32,
              size: u32| {
                 let env_interface = caller.data().clone();
                 let env = env_interface.lock().unwrap();
-                match env.get_code_size(&caller, address_offset, size) {
+                match env.get_code_size(&mut caller, address_offset, size) {
                     Ok(len) => Ok(len),
                     Err(e) => {
                         return Err(Trap::new(format!("trap, {}", e)));
@@ -334,8 +331,8 @@ impl evmc_vm::EvmcVm for FbWasm {
         context: Option<&'a mut evmc_vm::ExecutionContext<'a>>,
     ) -> evmc_vm::ExecutionResult {
         START.call_once(|| {
-            info!("fbwasm start");
             env_logger::init();
+            info!("fb wasm start");
         });
         let context = match context {
             Some(c) => c,
@@ -356,7 +353,7 @@ impl evmc_vm::EvmcVm for FbWasm {
             );
         }
         if !has_wasm_version(code, 1) {
-            error!("Contract has an invalid WebAssembly version");
+            error!("Contract has an invalid WebAssembly version {}", code[4]);
             return evmc_vm::ExecutionResult::new(
                 evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                 0,
@@ -365,26 +362,14 @@ impl evmc_vm::EvmcVm for FbWasm {
         }
         // get hash type from context
         let host_sm_crypto = context.get_host_context().isSMCrypto;
-        debug!("Create wasmtime runtime to run contract");
-        //let my_address = message.destination();
+        if log_enabled!(Level::Debug) {
+            debug!(
+                "Create wasmtime runtime to run contract {}",
+                String::from_utf8_lossy(message.destination())
+            );
+        }
 
         let env_interface = Arc::new(Mutex::new(EnvironmentInterface::new(context, message)));
-        // let mut config = Config::new();
-        // config
-        //     .async_support(true)
-        //     .cache_config_load_default()
-        //     .unwrap();
-        // let engine = match Engine::new(&WASMTIME_CONFIG) {
-        //     Ok(engine) => engine,
-        //     Err(e) => {
-        //         error!("Failed to create wasmtime engine: {}", e);
-        //         return evmc_vm::ExecutionResult::new(
-        //             evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
-        //             0,
-        //             None,
-        //         );
-        //     }
-        // };
         let module = match Module::from_binary(&WASMTIME_ENGINE, code) {
             Ok(module) => module,
             Err(e) => {
@@ -398,7 +383,6 @@ impl evmc_vm::EvmcVm for FbWasm {
         };
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
             Store::new(&WASMTIME_ENGINE, env_interface.clone());
-        // let store_context = store.as_context_mut();
         let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
         let global_gas = Global::new(&mut store, ty, Val::I64(message.gas())).unwrap();
@@ -426,7 +410,7 @@ impl evmc_vm::EvmcVm for FbWasm {
         let memory = match instance.get_memory(&mut store, "memory") {
             Some(memory) => memory,
             _ => {
-                error!("Failed to get memory from wasmt module");
+                error!("Failed to get memory from wasm module");
                 return evmc_vm::ExecutionResult::new(
                     evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                     0,
@@ -437,7 +421,6 @@ impl evmc_vm::EvmcVm for FbWasm {
         env_interface.lock().unwrap().set_memory(memory.clone());
 
         if message.kind() == evmc_call_kind::EVMC_CREATE {
-            debug!("verify contract");
             if !verify_contract(&module) {
                 error!("Contract code is not valid");
                 return evmc_vm::ExecutionResult::new(
@@ -448,7 +431,6 @@ impl evmc_vm::EvmcVm for FbWasm {
             }
         }
         let mut call_name = String::from("main");
-        // let runtime = Runtime::new().unwrap();
         if message.kind() == evmc_call_kind::EVMC_CREATE {
             call_name = String::from("deploy");
 
