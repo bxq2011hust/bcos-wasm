@@ -111,9 +111,9 @@ impl<'a> EnvironmentInterface<'a> {
         &self.output
     }
     #[inline]
-    fn wasm_memory_size(&self, store: impl AsContext) -> Result<usize, ExecuteError> {
+    fn wasm_memory_data_size(&self, store: impl AsContext) -> Result<usize, ExecuteError> {
         if let Some(wasm_memory) = &self.wasm_memory {
-            Ok(wasm_memory.size(&store) as usize)
+            Ok(wasm_memory.data_size(&store))
         } else {
             Err(ExecuteError::VMInternalError(String::from(
                 "wasm_memory is not set",
@@ -134,11 +134,11 @@ impl<'a> EnvironmentInterface<'a> {
                 offset, size
             )));
         }
-        let wasm_memory_size = self.wasm_memory_size(store)?;
-        if end as usize > wasm_memory_size {
+        let wasm_memory_data_size = self.wasm_memory_data_size(store)?;
+        if end as usize > wasm_memory_data_size {
             Err(ExecuteError::InvalidParameter(format!(
-                "offset + size > wasm_memory_size, offset: {}, size: {}, wasm_memory_size: {}",
-                offset, size, wasm_memory_size
+                "offset + size > wasm_memory_data_size, offset: {}, size: {}, wasm_memory_data_size: {}",
+                offset, size, wasm_memory_data_size
             )))
         } else {
             Ok(())
