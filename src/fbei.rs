@@ -537,7 +537,6 @@ impl<'a> EnvironmentInterface<'a> {
         self.check_memory_bounds(&store, address_offset, address_size)?;
         self.check_memory_bounds(&store, data_offset, data_size)?;
         self.take_gas(&mut store, GasSchedule::CALL)?;
-        let gas_left = self.get_gas_left(&mut store)?;
         let mut address: Vec<u8> = vec![0u8; address_size as usize];
         self.read_wasm_memory(
             &mut store,
@@ -553,6 +552,7 @@ impl<'a> EnvironmentInterface<'a> {
             "call",
         )?;
         let flags = self.message.flags() & MessageFlags::EVMC_STATIC as u32;
+        let gas_left = self.get_gas_left(&mut store)?;
         let message = ExecutionMessage::new(
             MessageKind::EVMC_CALL,
             flags,
