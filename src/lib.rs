@@ -12,6 +12,9 @@ use wasmtime::{
 };
 
 static START: Once = Once::new();
+const CONTRACT_MAIN: &str = "main";
+const CONTRACT_DEPLOY: &str = "deploy";
+const CONTRACT_HASH_TYPE: &str = "hash_type";
 lazy_static! {
     static ref WASMTIME_ENGINE: Engine = {
         let mut config = Config::new();
@@ -315,7 +318,15 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
 }
 
 fn verify_contract(module: &Module) -> bool {
-    // TODO: add logic of verify contract
+    let mut exports = module.exports();
+    if !exports.any(|export| export.name() == CONTRACT_MAIN) {
+        error!("can't find contract {} function", CONTRACT_MAIN);
+        return false;
+    }
+    if !exports.any(|export| export.name() == CONTRACT_DEPLOY) {
+        error!("can't find contract {} function", CONTRACT_DEPLOY);
+        return false;
+    }
     true
 }
 
@@ -395,6 +406,16 @@ impl evmc_vm::EvmcVm for FbWasm {
         linker
             .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
             .unwrap();
+        if message.kind() == evmc_call_kind::EVMC_CREATE {
+            if !verify_contract(&module) {
+                error!("Contract code is not valid");
+                return evmc_vm::ExecutionResult::new(
+                    evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                    0,
+                    None,
+                );
+            }
+        }
         let instance = match linker.instantiate(&mut store, &module) {
             Ok(instance) => instance,
             Err(e) => {
@@ -420,7 +441,9 @@ impl evmc_vm::EvmcVm for FbWasm {
         };
         env_interface.lock().unwrap().set_memory(memory.clone());
 
+        let mut call_name = String::from(CONTRACT_MAIN);
         if message.kind() == evmc_call_kind::EVMC_CREATE {
+            call_name = String::from(CONTRACT_DEPLOY);
             if !verify_contract(&module) {
                 error!("Contract code is not valid");
                 return evmc_vm::ExecutionResult::new(
@@ -429,13 +452,8 @@ impl evmc_vm::EvmcVm for FbWasm {
                     None,
                 );
             }
-        }
-        let mut call_name = String::from("main");
-        if message.kind() == evmc_call_kind::EVMC_CREATE {
-            call_name = String::from("deploy");
-
             // call hash function of wasm module
-            let func = match instance.get_typed_func::<(), i32, _>(&mut store, "hash_type") {
+            let func = match instance.get_typed_func::<(), i32, _>(&mut store, CONTRACT_HASH_TYPE) {
                 Ok(func) => func,
                 Err(e) => {
                     error!("Failed to get hash function: {}", e);
