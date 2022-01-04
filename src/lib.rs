@@ -20,9 +20,9 @@ lazy_static! {
     static ref WASMTIME_ENGINE: Engine = {
         let mut config = Config::new();
         config
-            .async_support(true)
-            .cache_config_load_default()
-            .unwrap();
+            .async_support(true);
+            // .cache_config_load_default()
+            // .unwrap();
         match Engine::new(&config) {
             Ok(engine) => engine,
             Err(e) => {
@@ -319,12 +319,11 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
 }
 
 fn verify_contract(module: &Module) -> bool {
-    let mut exports = module.exports();
-    if !exports.any(|export| export.name() == CONTRACT_MAIN) {
+    if !module.exports().any(|export| CONTRACT_MAIN.eq(export.name())) {
         error!("can't find contract {} function", CONTRACT_MAIN);
         return false;
     }
-    if !exports.any(|export| export.name() == CONTRACT_DEPLOY) {
+    if !module.exports().any(|export| CONTRACT_DEPLOY.eq(export.name())) {
         error!("can't find contract {} function", CONTRACT_DEPLOY);
         return false;
     }
