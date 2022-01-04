@@ -4,8 +4,9 @@ use async_std::task;
 use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
 use fbei::EnvironmentInterface;
 use lazy_static::lazy_static;
-use log::{debug, error, info, log_enabled, Level};
+use log::{error, info, log_enabled, Level};
 use std::sync::{Arc, Mutex, Once};
+use std::time::Instant;
 use wasmtime::{
     Caller, Config, Engine, Global, GlobalType, Linker, Module, Mutability, Store, Trap, Val,
     ValType,
@@ -341,6 +342,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         message: &'a evmc_vm::ExecutionMessage,
         context: Option<&'a mut evmc_vm::ExecutionContext<'a>>,
     ) -> evmc_vm::ExecutionResult {
+        let mut start = Instant::now();
         START.call_once(|| {
             env_logger::init();
             info!("wasm init");
@@ -373,13 +375,14 @@ impl evmc_vm::EvmcVm for BcosWasm {
         }
         // get hash type from context
         let host_sm_crypto = context.get_host_context().isSMCrypto;
-        if log_enabled!(Level::Debug) {
-            debug!(
-                "Create wasmtime runtime to run contract {}",
-                String::from_utf8_lossy(message.destination())
+        if log_enabled!(Level::Info) {
+            info!(
+                "Create wasmtime runtime to run contract {}, check code elapsed: {:?} μs",
+                String::from_utf8_lossy(message.destination()),
+                start.elapsed().as_micros()
             );
+            start = Instant::now();
         }
-
         let env_interface = Arc::new(Mutex::new(EnvironmentInterface::new(context, message)));
         let module = match Module::from_binary(&WASMTIME_ENGINE, code) {
             Ok(module) => module,
@@ -392,6 +395,13 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 );
             }
         };
+        if log_enabled!(Level::Info) {
+            info!(
+                "Module::from_binary elapsed: {:?} μs",
+                start.elapsed().as_micros()
+            );
+            start = Instant::now();
+        }
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
             Store::new(&WASMTIME_ENGINE, env_interface.clone());
         let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
@@ -427,6 +437,13 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 );
             }
         };
+        if log_enabled!(Level::Info) {
+            info!(
+                "instantiate wasm elapsed: {:?} μs",
+                start.elapsed().as_micros()
+            );
+            start = Instant::now();
+        }
         // extract memory from instance
         let memory = match instance.get_memory(&mut store, "memory") {
             Some(memory) => memory,
@@ -492,8 +509,12 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 );
             }
         }
-        if log_enabled!(log::Level::Debug) {
-            debug!("call {} function", call_name);
+        if log_enabled!(Level::Info) {
+            if message.kind() == evmc_call_kind::EVMC_CREATE {
+                info!("check hash elapsed: {:?} μs", start.elapsed().as_micros());
+                start = Instant::now();
+            }
+            info!("call {} function", call_name);
         }
         // call hash function of wasm module
         let func = match instance.get_typed_func::<(), (), _>(&mut store, &call_name) {
@@ -515,19 +536,35 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 return evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_WASM_TRAP, 0, None);
             }
         };
+        if log_enabled!(Level::Info) {
+            info!(
+                "call {} elapsed: {:?} μs",
+                call_name,
+                start.elapsed().as_micros()
+            );
+            start = Instant::now();
+        }
         // get gas left from env_interface
         let env = env_interface.lock().unwrap();
         // get output from env_interface
         let output = env.get_output();
+        let ret;
         if !env.reverted() {
             let gas_left = env.get_gas_left(&mut store).unwrap();
             if message.kind() == evmc_call_kind::EVMC_CREATE {
-                evmc_vm::ExecutionResult::success(gas_left, Some(code))
+                ret = evmc_vm::ExecutionResult::success(gas_left, Some(code));
             } else {
-                evmc_vm::ExecutionResult::success(gas_left, Some(output))
+                ret = evmc_vm::ExecutionResult::success(gas_left, Some(output));
             }
         } else {
-            evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_REVERT, 0, Some(output))
+            ret = evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_REVERT, 0, Some(output));
         }
+        if log_enabled!(Level::Info) {
+            info!(
+                "prepare result elapsed: {:?} μs",
+                start.elapsed().as_micros()
+            );
+        }
+        ret
     }
 }

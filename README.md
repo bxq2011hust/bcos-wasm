@@ -1,8 +1,8 @@
 ![FISCO_BCOS_Logo](https://github.com/FISCO-BCOS/FISCO-BCOS/raw/master/docs/images/FISCO_BCOS_Logo.svg?sanitize=true)
 
-# FB-WASM
+# bcos-wasm
 
-FB-WASM is the WASM runtime of [FISCO BCOS 3.0](https://github.com/FISCO-BCOS/FISCO-BCOS).
+bcos-wasm is the WASM runtime of [FISCO BCOS 3.0](https://github.com/FISCO-BCOS/FISCO-BCOS).
 
 ## Documentation
 
