@@ -4,9 +4,10 @@ use async_std::task;
 use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
 use fbei::EnvironmentInterface;
 use lazy_static::lazy_static;
-use log::{error, info, log_enabled, Level};
+use log::{debug, error, info, log_enabled, Level};
+use lru::LruCache;
 use std::sync::{Arc, Mutex, Once};
-use std::time::Instant;
+use std::{env, time::Instant};
 use wasmtime::{
     Caller, Config, Engine, Global, GlobalType, Linker, Module, Mutability, Store, Trap, Val,
     ValType,
@@ -29,6 +30,17 @@ lazy_static! {
                 panic!("Failed to create wasmtime engine: {}", e);
             }
         }
+    };
+    static ref WASM_MODULE_CACHE : Mutex<lru::LruCache<String, Module>> = {
+        let mut capacity = 100;
+        match env::var_os("BCOS_WASM_MODULE_CACHE_CAPACITY") {
+            Some(val) => {
+                info!("BCOS_WASM_MODULE_CACHE_CAPACITY is {}", capacity);
+                capacity = val.into_string().unwrap().parse::<usize>().unwrap();
+            },
+            None => info!("BCOS_WASM_MODULE_CACHE_CAPACITY not set, using default capacity {}", capacity),
+        };
+        Mutex::new(LruCache::new(capacity))
     };
 }
 #[evmc_declare::evmc_declare_vm("bcos wasm", "fbwasm", "1.0.0-rc1")]
@@ -319,11 +331,17 @@ fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
 }
 
 fn verify_contract(module: &Module) -> bool {
-    if !module.exports().any(|export| CONTRACT_MAIN.eq(export.name())) {
+    if !module
+        .exports()
+        .any(|export| CONTRACT_MAIN.eq(export.name()))
+    {
         error!("can't find contract {} function", CONTRACT_MAIN);
         return false;
     }
-    if !module.exports().any(|export| CONTRACT_DEPLOY.eq(export.name())) {
+    if !module
+        .exports()
+        .any(|export| CONTRACT_DEPLOY.eq(export.name()))
+    {
         error!("can't find contract {} function", CONTRACT_DEPLOY);
         return false;
     }
@@ -374,26 +392,54 @@ impl evmc_vm::EvmcVm for BcosWasm {
         }
         // get hash type from context
         let host_sm_crypto = context.get_host_context().isSMCrypto;
+        let dest = String::from_utf8_lossy(message.destination()).to_string();
         if log_enabled!(Level::Info) {
             info!(
                 "Create wasmtime runtime to run contract {}, check code elapsed: {:?} μs",
-                String::from_utf8_lossy(message.destination()),
+                dest,
                 start.elapsed().as_micros()
             );
             start = Instant::now();
         }
         let env_interface = Arc::new(Mutex::new(EnvironmentInterface::new(context, message)));
-        let module = match Module::from_binary(&WASMTIME_ENGINE, code) {
-            Ok(module) => module,
-            Err(e) => {
-                error!("Failed to create wasmtime engine: {}", e);
-                return evmc_vm::ExecutionResult::new(
-                    evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
-                    0,
-                    None,
-                );
+        let module;
+        {
+            let mut modules = WASM_MODULE_CACHE.lock().unwrap();
+            match modules.get(&dest) {
+                Some(m) => {
+                    if log_enabled!(Level::Debug) {
+                        debug!("cached module hit for contract {}", dest);
+                    }
+                    module = m.clone();
+                }
+                None => {
+                    module = match Module::from_binary(&WASMTIME_ENGINE, code) {
+                        Ok(module) => {
+                            if message.kind() == evmc_call_kind::EVMC_CREATE {
+                                if !verify_contract(&module) {
+                                    return evmc_vm::ExecutionResult::new(
+                                        evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                                        0,
+                                        None,
+                                    );
+                                }
+                            }
+                            modules.put(dest, module.clone());
+                            module
+                        }
+                        Err(e) => {
+                            error!("Failed to compile wasm code to module: {}", e);
+                            return evmc_vm::ExecutionResult::new(
+                                evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                                0,
+                                None,
+                            );
+                        }
+                    };
+                }
             }
-        };
+        }
+
         if log_enabled!(Level::Info) {
             info!(
                 "Module::from_binary elapsed: {:?} μs",
@@ -415,16 +461,8 @@ impl evmc_vm::EvmcVm for BcosWasm {
         linker
             .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
             .unwrap();
-        if message.kind() == evmc_call_kind::EVMC_CREATE {
-            if !verify_contract(&module) {
-                error!("Contract code is not valid");
-                return evmc_vm::ExecutionResult::new(
-                    evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
-                    0,
-                    None,
-                );
-            }
-        }
+        if message.kind() == evmc_call_kind::EVMC_CREATE {}
+
         let instance = match linker.instantiate(&mut store, &module) {
             Ok(instance) => instance,
             Err(e) => {
