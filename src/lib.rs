@@ -30,8 +30,8 @@ lazy_static! {
         }
     };
 }
-#[evmc_declare::evmc_declare_vm("fbwasm", "fbwasm", "1.0.0-rc1")]
-pub struct FbWasm;
+#[evmc_declare::evmc_declare_vm("bcos wasm", "fbwasm", "1.0.0-rc1")]
+pub struct BcosWasm;
 
 const BCOS_MODULE_NAME: &str = "bcos";
 const BCOS_GLOBAL_GAS_VAR: &str = "gas";
@@ -330,9 +330,9 @@ fn verify_contract(module: &Module) -> bool {
     true
 }
 
-impl evmc_vm::EvmcVm for FbWasm {
+impl evmc_vm::EvmcVm for BcosWasm {
     fn init() -> Self {
-        FbWasm {}
+        BcosWasm {}
     }
     fn execute<'a>(
         &self,
@@ -343,7 +343,7 @@ impl evmc_vm::EvmcVm for FbWasm {
     ) -> evmc_vm::ExecutionResult {
         START.call_once(|| {
             env_logger::init();
-            info!("fb wasm start");
+            info!("wasm init");
         });
         let context = match context {
             Some(c) => c,
