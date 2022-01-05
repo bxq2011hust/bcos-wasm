@@ -3,9 +3,9 @@ mod fbei;
 use async_std::task;
 use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
 use fbei::EnvironmentInterface;
-use lazy_static::lazy_static;
 use log::{debug, error, info, log_enabled, Level};
 use lru::LruCache;
+use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex, Once};
 use std::{env, time::Instant};
 use wasmtime::{
@@ -17,32 +17,38 @@ static START: Once = Once::new();
 const CONTRACT_MAIN: &str = "main";
 const CONTRACT_DEPLOY: &str = "deploy";
 const CONTRACT_HASH_TYPE: &str = "hash_type";
-lazy_static! {
-    static ref WASMTIME_ENGINE: Engine = {
-        let mut config = Config::new();
-        config
-            .async_support(true);
-            // .cache_config_load_default()
-            // .unwrap();
-        match Engine::new(&config) {
-            Ok(engine) => engine,
-            Err(e) => {
-                panic!("Failed to create wasmtime engine: {}", e);
-            }
+
+static WASMTIME_ENGINE: Lazy<Engine> = Lazy::new(|| {
+    let mut config = Config::new();
+    config.async_support(true);
+    // .cache_config_load_default()
+    // .unwrap();
+    match Engine::new(&config) {
+        Ok(engine) => engine,
+        Err(e) => {
+            panic!("Failed to create wasmtime engine: {}", e);
         }
+    }
+});
+
+static WASM_MODULE_CACHE: Lazy<Mutex<lru::LruCache<String, Module>>> = Lazy::new(|| {
+    let mut capacity = 100;
+    match env::var_os("BCOS_WASM_MODULE_CACHE_CAPACITY") {
+        Some(val) => {
+            info!("BCOS_WASM_MODULE_CACHE_CAPACITY is {}", capacity);
+            capacity = val.into_string().unwrap().parse::<usize>().unwrap();
+        }
+        None => info!(
+            "BCOS_WASM_MODULE_CACHE_CAPACITY not set, using default capacity {}",
+            capacity
+        ),
     };
-    static ref WASM_MODULE_CACHE : Mutex<lru::LruCache<String, Module>> = {
-        let mut capacity = 100;
-        match env::var_os("BCOS_WASM_MODULE_CACHE_CAPACITY") {
-            Some(val) => {
-                info!("BCOS_WASM_MODULE_CACHE_CAPACITY is {}", capacity);
-                capacity = val.into_string().unwrap().parse::<usize>().unwrap();
-            },
-            None => info!("BCOS_WASM_MODULE_CACHE_CAPACITY not set, using default capacity {}", capacity),
-        };
-        Mutex::new(LruCache::new(capacity))
-    };
-}
+    Mutex::new(LruCache::new(capacity))
+});
+
+// static WASMTIME_LINKER: Lazy<Mutex<Linker<Arc<Mutex<EnvironmentInterface>>>>> =
+//     Lazy::new(|| Mutex::new(Linker::new(&WASMTIME_ENGINE)));
+
 #[evmc_declare::evmc_declare_vm("bcos wasm", "fbwasm", "1.0.0-rc1")]
 pub struct BcosWasm;
 
@@ -450,6 +456,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
             Store::new(&WASMTIME_ENGINE, env_interface.clone());
         let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
+        // let mut linker= WASMTIME_LINKER.lock().unwrap().clone();
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
         let global_gas = Global::new(&mut store, ty, Val::I64(message.gas())).unwrap();
         env_interface
@@ -461,8 +468,13 @@ impl evmc_vm::EvmcVm for BcosWasm {
         linker
             .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
             .unwrap();
-        if message.kind() == evmc_call_kind::EVMC_CREATE {}
-
+        if log_enabled!(Level::Debug) {
+            debug!(
+                "prepare_imports elapsed: {:?} μs",
+                start.elapsed().as_micros()
+            );
+            start = Instant::now();
+        }
         let instance = match linker.instantiate(&mut store, &module) {
             Ok(instance) => instance,
             Err(e) => {
@@ -546,12 +558,12 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 );
             }
         }
-        if log_enabled!(Level::Info) {
+        if log_enabled!(Level::Debug) {
             if message.kind() == evmc_call_kind::EVMC_CREATE {
-                info!("check hash elapsed: {:?} μs", start.elapsed().as_micros());
+                debug!("check hash elapsed: {:?} μs", start.elapsed().as_micros());
                 start = Instant::now();
             }
-            info!("call {} function", call_name);
+            debug!("call {} function", call_name);
         }
         // call hash function of wasm module
         let func = match instance.get_typed_func::<(), (), _>(&mut store, &call_name) {
@@ -596,8 +608,8 @@ impl evmc_vm::EvmcVm for BcosWasm {
         } else {
             ret = evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_REVERT, 0, Some(output));
         }
-        if log_enabled!(Level::Info) {
-            info!(
+        if log_enabled!(Level::Debug) {
+            debug!(
                 "prepare result elapsed: {:?} μs",
                 start.elapsed().as_micros()
             );
