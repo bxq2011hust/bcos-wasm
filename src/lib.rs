@@ -1,5 +1,6 @@
 mod fbei;
 
+use crate::fbei::EnvInterface;
 use async_std::task;
 use evmc_vm::ffi::{evmc_call_kind, evmc_status_code};
 use fbei::EnvironmentInterface;
@@ -46,8 +47,8 @@ static WASM_MODULE_CACHE: Lazy<Mutex<lru::LruCache<String, Module>>> = Lazy::new
     Mutex::new(LruCache::new(capacity))
 });
 
-// static WASMTIME_LINKER: Lazy<Mutex<Linker<Arc<Mutex<EnvironmentInterface>>>>> =
-//     Lazy::new(|| Mutex::new(Linker::new(&WASMTIME_ENGINE)));
+// static WASMTIME_LINKER: Lazy<Arc<Mutex<Linker<Arc<Mutex<EnvironmentInterface>>>>>> =
+//     Lazy::new(|| Arc::new(Mutex::new(Linker::new(&WASMTIME_ENGINE))));
 
 #[evmc_declare::evmc_declare_vm("bcos wasm", "fbwasm", "1.0.0-rc1")]
 pub struct BcosWasm;
@@ -401,7 +402,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let dest = String::from_utf8_lossy(message.destination()).to_string();
         if log_enabled!(Level::Info) {
             info!(
-                "Create wasmtime runtime to run contract {}, check code elapsed: {:?} μs",
+                "create runtime for {}, check code elapsed: {:?} μs",
                 dest,
                 start.elapsed().as_micros()
             );
@@ -456,7 +457,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
             Store::new(&WASMTIME_ENGINE, env_interface.clone());
         let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
-        // let mut linker= WASMTIME_LINKER.lock().unwrap().clone();
+        // let mut linker = WASMTIME_LINKER.lock().unwrap().clone();
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
         let global_gas = Global::new(&mut store, ty, Val::I64(message.gas())).unwrap();
         env_interface
@@ -468,8 +469,8 @@ impl evmc_vm::EvmcVm for BcosWasm {
         linker
             .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
             .unwrap();
-        if log_enabled!(Level::Debug) {
-            debug!(
+        if log_enabled!(Level::Info) {
+            info!(
                 "prepare_imports elapsed: {:?} μs",
                 start.elapsed().as_micros()
             );
@@ -593,7 +594,6 @@ impl evmc_vm::EvmcVm for BcosWasm {
             );
             start = Instant::now();
         }
-        // get gas left from env_interface
         let env = env_interface.lock().unwrap();
         // get output from env_interface
         let output = env.get_output();
