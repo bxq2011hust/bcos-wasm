@@ -1,9 +1,10 @@
+use crate::Error;
 use evmc_vm::{
     Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256,
 };
 use log::{debug, log_enabled, Level};
 use sha3::Digest;
-use std::{cell::RefCell, error, fmt};
+use std::cell::RefCell;
 use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
 
 pub struct EnvironmentInterface<'a> {
@@ -19,27 +20,6 @@ pub struct EnvironmentInterface<'a> {
 unsafe impl Send for EnvironmentInterface<'_> {}
 
 unsafe impl Sync for EnvironmentInterface<'_> {}
-
-#[derive(Debug, Clone)]
-pub enum ExecuteError {
-    OutOfGas(String),
-    InvalidParameter(String),
-    VMInternalError(String),
-    InvalidReturnStatus(i32),
-}
-
-impl fmt::Display for ExecuteError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ExecuteError::OutOfGas(message) => write!(f, "out of gas, {}", message),
-            ExecuteError::InvalidParameter(message) => write!(f, "InvalidParameter, {}", message),
-            ExecuteError::VMInternalError(message) => write!(f, "VMInternalError, {}", message),
-            ExecuteError::InvalidReturnStatus(code) => write!(f, "InvalidReturnStatus, {}", code),
-        }
-    }
-}
-
-impl error::Error for ExecuteError {}
 
 struct GasSchedule;
 
@@ -62,10 +42,10 @@ fn wasm_memory_read(
     offset: usize,
     buffer: &mut [u8],
     caller: &str,
-) -> Result<(), ExecuteError> {
+) -> Result<(), Error> {
     match wasm_memory.read(&store, offset as usize, buffer) {
         Ok(_) => Ok(()),
-        Err(_) => Err(ExecuteError::InvalidParameter(format!(
+        Err(_) => Err(Error::InvalidParameter(format!(
             "wasm_memory.read failed, caller: {}",
             caller
         ))),
@@ -78,24 +58,16 @@ pub trait EnvInterface {
         store: impl AsContext,
         data_offset: u32,
         data_size: u32,
-    ) -> Result<(), ExecuteError>;
+    ) -> Result<(), Error>;
     fn revert(
         &mut self,
         store: impl AsContext,
         data_offset: u32,
         data_size: u32,
-    ) -> Result<(), ExecuteError>;
-    fn get_address(
-        &self,
-        store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<i32, ExecuteError>;
-    fn get_call_data_size(&self) -> Result<i32, ExecuteError>;
-    fn get_call_data(
-        &self,
-        store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<(), ExecuteError>;
+    ) -> Result<(), Error>;
+    fn get_address(&self, store: impl AsContextMut, result_offset: u32) -> Result<i32, Error>;
+    fn get_call_data_size(&self) -> Result<i32, Error>;
+    fn get_call_data(&self, store: impl AsContextMut, result_offset: u32) -> Result<(), Error>;
     fn set_storage(
         &mut self,
         store: impl AsContextMut,
@@ -103,7 +75,7 @@ pub trait EnvInterface {
         key_size: u32,
         value_offset: u32,
         value_size: u32,
-    ) -> Result<StorageStatus, ExecuteError>;
+    ) -> Result<StorageStatus, Error>;
     fn get_storage(
         &self,
         store: impl AsContextMut,
@@ -111,23 +83,15 @@ pub trait EnvInterface {
         key_size: u32,
         value_offset: u32,
         value_size: u32,
-    ) -> Result<i32, ExecuteError>;
-    fn get_caller(
-        &self,
-        store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<i32, ExecuteError>;
-    fn get_tx_origin(
-        &self,
-        store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<i32, ExecuteError>;
+    ) -> Result<i32, Error>;
+    fn get_caller(&self, store: impl AsContextMut, result_offset: u32) -> Result<i32, Error>;
+    fn get_tx_origin(&self, store: impl AsContextMut, result_offset: u32) -> Result<i32, Error>;
     fn get_code_size(
         &self,
         store: impl AsContextMut,
         address_offset: u32,
         size: u32,
-    ) -> Result<i32, ExecuteError> ;
+    ) -> Result<i32, Error>;
     fn get_block_number(&self) -> i64;
     fn get_block_timestamp(&self) -> i64;
     fn log(
@@ -140,13 +104,9 @@ pub trait EnvInterface {
         topic2: u32,
         topic3: u32,
         topic4: u32,
-    ) -> Result<(), ExecuteError>;
+    ) -> Result<(), Error>;
     fn get_return_data_size(&self) -> i32;
-    fn get_return_data(
-        &self,
-        store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<(), ExecuteError>;
+    fn get_return_data(&self, store: impl AsContextMut, result_offset: u32) -> Result<(), Error>;
     fn call(
         &mut self,
         store: impl AsContextMut,
@@ -154,8 +114,7 @@ pub trait EnvInterface {
         address_size: u32,
         data_offset: u32,
         data_size: u32,
-    ) -> Result<i32, ExecuteError>;
-
+    ) -> Result<i32, Error>;
 }
 
 impl<'a> EnvironmentInterface<'a> {
@@ -179,16 +138,14 @@ impl<'a> EnvironmentInterface<'a> {
     pub fn set_gas_global(&mut self, gas: Global) {
         self.gas_left = Some(RefCell::new(gas));
     }
-    pub fn get_gas_left(&self, mut store: impl AsContextMut) -> Result<i64, ExecuteError> {
+    pub fn get_gas_left(&self, mut store: impl AsContextMut) -> Result<i64, Error> {
         if let Some(gas_left) = &self.gas_left {
             match gas_left.borrow().get(&mut store).i64() {
                 Some(gas) => Ok(gas),
-                None => Err(ExecuteError::VMInternalError(
-                    "gas_left.get() failed".to_string(),
-                )),
+                None => Err(Error::VMInternalError("gas_left.get() failed".to_string())),
             }
         } else {
-            Err(ExecuteError::VMInternalError(String::from(
+            Err(Error::VMInternalError(String::from(
                 "the global gas var is not init",
             )))
         }
@@ -197,11 +154,11 @@ impl<'a> EnvironmentInterface<'a> {
         &self.output
     }
     #[inline]
-    fn wasm_memory_data_size(&self, store: impl AsContext) -> Result<usize, ExecuteError> {
+    fn wasm_memory_data_size(&self, store: impl AsContext) -> Result<usize, Error> {
         if let Some(wasm_memory) = &self.wasm_memory {
             Ok(wasm_memory.data_size(&store))
         } else {
-            Err(ExecuteError::VMInternalError(String::from(
+            Err(Error::VMInternalError(String::from(
                 "wasm_memory is not set",
             )))
         }
@@ -212,17 +169,17 @@ impl<'a> EnvironmentInterface<'a> {
         store: impl AsContext,
         offset: u32,
         size: u32,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         let end = offset + size;
         if end < offset {
-            return Err(ExecuteError::InvalidParameter(format!(
+            return Err(Error::InvalidParameter(format!(
                 "offset + size overflows, offset: {}, size: {}",
                 offset, size
             )));
         }
         let wasm_memory_data_size = self.wasm_memory_data_size(store)?;
         if end as usize > wasm_memory_data_size {
-            Err(ExecuteError::InvalidParameter(format!(
+            Err(Error::InvalidParameter(format!(
                 "offset + size > wasm_memory_data_size, offset: {}, size: {}, wasm_memory_data_size: {}",
                 offset, size, wasm_memory_data_size
             )))
@@ -237,13 +194,13 @@ impl<'a> EnvironmentInterface<'a> {
         offset: usize,
         buffer: &mut [u8],
         caller: &str,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         match &self.wasm_memory {
             Some(wasm_memory) => {
                 self.take_gas(&mut store, GasSchedule::VERY_LOW * buffer.len() as i64)?;
                 wasm_memory_read(wasm_memory, &store, offset as usize, buffer, caller)
             }
-            None => Err(ExecuteError::VMInternalError(format!(
+            None => Err(Error::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
             ))),
@@ -255,29 +212,29 @@ impl<'a> EnvironmentInterface<'a> {
         offset: usize,
         buffer: &[u8],
         caller: &str,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         match &self.wasm_memory {
             Some(wasm_memory) => {
                 self.take_gas(&mut store, GasSchedule::VERY_LOW * buffer.len() as i64)?;
                 match wasm_memory.write(&mut store, offset as usize, buffer) {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(ExecuteError::InvalidParameter(format!(
+                    Err(_) => Err(Error::InvalidParameter(format!(
                         "wasm_memory.write failed, caller: {}",
                         caller
                     ))),
                 }
             }
-            None => Err(ExecuteError::VMInternalError(format!(
+            None => Err(Error::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
             ))),
         }
     }
-    fn take_gas(&self, mut store: impl AsContextMut, gas: i64) -> Result<(), ExecuteError> {
+    fn take_gas(&self, mut store: impl AsContextMut, gas: i64) -> Result<(), Error> {
         if let Some(gas_left) = &self.gas_left {
             let remain = gas_left.borrow().get(&mut store).i64().unwrap() - gas;
             if remain < 0 {
-                return Err(ExecuteError::OutOfGas(String::from("call takeGas")));
+                return Err(Error::OutOfGas(String::from("call takeGas")));
             }
             gas_left
                 .borrow_mut()
@@ -285,17 +242,17 @@ impl<'a> EnvironmentInterface<'a> {
                 .unwrap();
             return Ok(());
         } else {
-            return Err(ExecuteError::VMInternalError(String::from(
+            return Err(Error::VMInternalError(String::from(
                 "the global gas var is not init",
             )));
         }
     }
 
-    fn add_gas(&self, mut store: impl AsContextMut, gas: i64) -> Result<(), ExecuteError> {
+    fn add_gas(&self, mut store: impl AsContextMut, gas: i64) -> Result<(), Error> {
         if let Some(gas_left) = &self.gas_left {
             let remain = gas_left.borrow().get(&mut store).i64().unwrap() + gas;
             if remain <= 0 {
-                return Err(ExecuteError::OutOfGas(String::from("call add_gas")));
+                return Err(Error::OutOfGas(String::from("call add_gas")));
             }
             gas_left
                 .borrow_mut()
@@ -303,7 +260,7 @@ impl<'a> EnvironmentInterface<'a> {
                 .unwrap();
             return Ok(());
         } else {
-            return Err(ExecuteError::VMInternalError(String::from(
+            return Err(Error::VMInternalError(String::from(
                 "the global gas var is not init",
             )));
         }
@@ -339,7 +296,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     store: impl AsContext,
     //     data_offset: u32,
     //     data_size: u32,
-    // ) -> Result<(), ExecuteError> {
+    // ) -> Result<(), Error> {
     //     self.revert = false;
     //     self.output.resize(data_size as usize, 0);
     //     let buffer = self.output.as_mut_slice();
@@ -348,7 +305,7 @@ impl<'a> EnvironmentInterface<'a> {
     //         Some(wasm_memory) => {
     //             wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
     //         }
-    //         None => Err(ExecuteError::VMInternalError(format!(
+    //         None => Err(Error::VMInternalError(format!(
     //             "{} failed, no wasm_memory",
     //             caller
     //         ))),
@@ -359,7 +316,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     store: impl AsContext,
     //     data_offset: u32,
     //     data_size: u32,
-    // ) -> Result<(), ExecuteError> {
+    // ) -> Result<(), Error> {
     //     self.revert = true;
     //     self.output.resize(data_size as usize, 0);
     //     let buffer = self.output.as_mut_slice();
@@ -368,7 +325,7 @@ impl<'a> EnvironmentInterface<'a> {
     //         Some(wasm_memory) => {
     //             wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
     //         }
-    //         None => Err(ExecuteError::VMInternalError(format!(
+    //         None => Err(Error::VMInternalError(format!(
     //             "{} failed, no wasm_memory",
     //             caller
     //         ))),
@@ -381,7 +338,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     &self,
     //     mut store: impl AsContextMut,
     //     result_offset: u32,
-    // ) -> Result<i32, ExecuteError> {
+    // ) -> Result<i32, Error> {
     //     self.check_memory_bounds(
     //         &store,
     //         result_offset,
@@ -395,7 +352,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     )?;
     //     Ok(self.message.destination().len() as i32)
     // }
-    // pub fn get_call_data_size(&self) -> Result<i32, ExecuteError> {
+    // pub fn get_call_data_size(&self) -> Result<i32, Error> {
     //     match self.message.input() {
     //         Some(input) => Ok(input.len() as i32),
     //         None => Ok(0),
@@ -405,7 +362,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     &self,
     //     mut store: impl AsContextMut,
     //     result_offset: u32,
-    // ) -> Result<(), ExecuteError> {
+    // ) -> Result<(), Error> {
     //     match self.message.input() {
     //         Some(input) => {
     //             self.check_memory_bounds(&store, result_offset, input.len() as u32)?;
@@ -431,7 +388,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     key_size: u32,
     //     value_offset: u32,
     //     value_size: u32,
-    // ) -> Result<StorageStatus, ExecuteError> {
+    // ) -> Result<StorageStatus, Error> {
     //     self.check_memory_bounds(&store, key_offset, key_size)?;
     //     self.check_memory_bounds(&store, value_offset, value_size)?;
     //     self.take_gas(&mut store, GasSchedule::STORAGE_STORE_CHANGE)?;
@@ -462,7 +419,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     key_size: u32,
     //     value_offset: u32,
     //     value_size: u32,
-    // ) -> Result<i32, ExecuteError> {
+    // ) -> Result<i32, Error> {
     //     self.check_memory_bounds(&store, key_offset, key_size)?;
     //     self.check_memory_bounds(&store, value_offset, value_size)?;
     //     let mut key = vec![0u8; key_size as usize];
@@ -494,7 +451,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     &self,
     //     mut store: impl AsContextMut,
     //     result_offset: u32,
-    // ) -> Result<i32, ExecuteError> {
+    // ) -> Result<i32, Error> {
     //     self.check_memory_bounds(&store, result_offset, self.message.sender().len() as u32)?;
     //     if self.host_context.get_tx_context().tx_origin.bytes == self.message.sender().as_slice() {
     //         // if caller is account return eip-55 address else return string
@@ -513,7 +470,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     &self,
     //     mut store: impl AsContextMut,
     //     result_offset: u32,
-    // ) -> Result<i32, ExecuteError> {
+    // ) -> Result<i32, Error> {
     //     self.check_memory_bounds(&store, result_offset, 40)?;
     //     // the return is always 40 bytes
     //     let checksum_address =
@@ -531,7 +488,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     mut store: impl AsContextMut,
     //     address_offset: u32,
     //     size: u32,
-    // ) -> Result<i32, ExecuteError> {
+    // ) -> Result<i32, Error> {
     //     self.check_memory_bounds(&store, address_offset, size)?;
     //     self.take_gas(&mut store, GasSchedule::EXTERNAL_CODE)?;
     //     let mut address = vec![0u8; size as usize];
@@ -559,7 +516,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     topic2: u32,
     //     topic3: u32,
     //     topic4: u32,
-    // ) -> Result<(), ExecuteError> {
+    // ) -> Result<(), Error> {
     //     self.check_memory_bounds(&store, data_offset, data_size)?;
     //     self.check_memory_bounds(&store, topic1, (number_of_topics * 32) as u32)?;
     //     self.take_gas(
@@ -598,7 +555,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     &self,
     //     mut store: impl AsContextMut,
     //     result_offset: u32,
-    // ) -> Result<(), ExecuteError> {
+    // ) -> Result<(), Error> {
     //     self.check_memory_bounds(
     //         &store,
     //         result_offset,
@@ -618,7 +575,7 @@ impl<'a> EnvironmentInterface<'a> {
     //     address_size: u32,
     //     data_offset: u32,
     //     data_size: u32,
-    // ) -> Result<i32, ExecuteError> {
+    // ) -> Result<i32, Error> {
     //     self.check_memory_bounds(&store, address_offset, address_size)?;
     //     self.check_memory_bounds(&store, data_offset, data_size)?;
     //     self.take_gas(&mut store, GasSchedule::CALL)?;
@@ -671,13 +628,12 @@ impl<'a> EnvironmentInterface<'a> {
     //         StatusCode::EVMC_SUCCESS => Ok(0),
     //         StatusCode::EVMC_REVERT => Ok(2),
     //         StatusCode::EVMC_FAILURE => Ok(1),
-    //         _ => Err(ExecuteError::InvalidReturnStatus(
+    //         _ => Err(Error::InvalidReturnStatus(
     //             result.status_code() as i32
     //         )),
     //     }
     // }
 }
-
 
 impl EnvInterface for EnvironmentInterface<'_> {
     fn finish(
@@ -685,7 +641,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         store: impl AsContext,
         data_offset: u32,
         data_size: u32,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         self.revert = false;
         self.output.resize(data_size as usize, 0);
         let buffer = self.output.as_mut_slice();
@@ -694,7 +650,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
             Some(wasm_memory) => {
                 wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
             }
-            None => Err(ExecuteError::VMInternalError(format!(
+            None => Err(Error::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
             ))),
@@ -705,7 +661,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         store: impl AsContext,
         data_offset: u32,
         data_size: u32,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         self.revert = true;
         self.output.resize(data_size as usize, 0);
         let buffer = self.output.as_mut_slice();
@@ -714,18 +670,14 @@ impl EnvInterface for EnvironmentInterface<'_> {
             Some(wasm_memory) => {
                 wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
             }
-            None => Err(ExecuteError::VMInternalError(format!(
+            None => Err(Error::VMInternalError(format!(
                 "{} failed, no wasm_memory",
                 caller
             ))),
         }
     }
     // get the address of the current contract
-    fn get_address(
-        &self,
-        mut store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<i32, ExecuteError> {
+    fn get_address(&self, mut store: impl AsContextMut, result_offset: u32) -> Result<i32, Error> {
         self.check_memory_bounds(
             &store,
             result_offset,
@@ -739,17 +691,13 @@ impl EnvInterface for EnvironmentInterface<'_> {
         )?;
         Ok(self.message.destination().len() as i32)
     }
-    fn get_call_data_size(&self) -> Result<i32, ExecuteError> {
+    fn get_call_data_size(&self) -> Result<i32, Error> {
         match self.message.input() {
             Some(input) => Ok(input.len() as i32),
             None => Ok(0),
         }
     }
-    fn get_call_data(
-        &self,
-        mut store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<(), ExecuteError> {
+    fn get_call_data(&self, mut store: impl AsContextMut, result_offset: u32) -> Result<(), Error> {
         match self.message.input() {
             Some(input) => {
                 self.check_memory_bounds(&store, result_offset, input.len() as u32)?;
@@ -775,7 +723,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         key_size: u32,
         value_offset: u32,
         value_size: u32,
-    ) -> Result<StorageStatus, ExecuteError> {
+    ) -> Result<StorageStatus, Error> {
         self.check_memory_bounds(&store, key_offset, key_size)?;
         self.check_memory_bounds(&store, value_offset, value_size)?;
         self.take_gas(&mut store, GasSchedule::STORAGE_STORE_CHANGE)?;
@@ -806,7 +754,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         key_size: u32,
         value_offset: u32,
         value_size: u32,
-    ) -> Result<i32, ExecuteError> {
+    ) -> Result<i32, Error> {
         self.check_memory_bounds(&store, key_offset, key_size)?;
         self.check_memory_bounds(&store, value_offset, value_size)?;
         let mut key = vec![0u8; key_size as usize];
@@ -834,11 +782,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
             Err(e) => Err(e),
         }
     }
-    fn get_caller(
-        &self,
-        mut store: impl AsContextMut,
-        result_offset: u32,
-    ) -> Result<i32, ExecuteError> {
+    fn get_caller(&self, mut store: impl AsContextMut, result_offset: u32) -> Result<i32, Error> {
         self.check_memory_bounds(&store, result_offset, self.message.sender().len() as u32)?;
         if self.host_context.get_tx_context().tx_origin.bytes == self.message.sender().as_slice() {
             // if caller is account return eip-55 address else return string
@@ -857,7 +801,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         &self,
         mut store: impl AsContextMut,
         result_offset: u32,
-    ) -> Result<i32, ExecuteError> {
+    ) -> Result<i32, Error> {
         self.check_memory_bounds(&store, result_offset, 40)?;
         // the return is always 40 bytes
         let checksum_address =
@@ -875,7 +819,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         mut store: impl AsContextMut,
         address_offset: u32,
         size: u32,
-    ) -> Result<i32, ExecuteError> {
+    ) -> Result<i32, Error> {
         self.check_memory_bounds(&store, address_offset, size)?;
         self.take_gas(&mut store, GasSchedule::EXTERNAL_CODE)?;
         let mut address = vec![0u8; size as usize];
@@ -903,7 +847,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         topic2: u32,
         topic3: u32,
         topic4: u32,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         self.check_memory_bounds(&store, data_offset, data_size)?;
         self.check_memory_bounds(&store, topic1, (number_of_topics * 32) as u32)?;
         self.take_gas(
@@ -942,7 +886,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         &self,
         mut store: impl AsContextMut,
         result_offset: u32,
-    ) -> Result<(), ExecuteError> {
+    ) -> Result<(), Error> {
         self.check_memory_bounds(
             &store,
             result_offset,
@@ -962,7 +906,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
         address_size: u32,
         data_offset: u32,
         data_size: u32,
-    ) -> Result<i32, ExecuteError> {
+    ) -> Result<i32, Error> {
         self.check_memory_bounds(&store, address_offset, address_size)?;
         self.check_memory_bounds(&store, data_offset, data_size)?;
         self.take_gas(&mut store, GasSchedule::CALL)?;
@@ -1015,9 +959,7 @@ impl EnvInterface for EnvironmentInterface<'_> {
             StatusCode::EVMC_SUCCESS => Ok(0),
             StatusCode::EVMC_REVERT => Ok(2),
             StatusCode::EVMC_FAILURE => Ok(1),
-            _ => Err(ExecuteError::InvalidReturnStatus(
-                result.status_code() as i32
-            )),
+            _ => Err(Error::InvalidReturnStatus(result.status_code() as i32)),
         }
     }
 }

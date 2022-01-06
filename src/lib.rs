@@ -8,7 +8,7 @@ use log::{debug, error, info, log_enabled, Level};
 use lru::LruCache;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex, Once};
-use std::{env, time::Instant};
+use std::{env, error, fmt, time::Instant};
 use wasmtime::{
     Caller, Config, Engine, Global, GlobalType, Linker, Module, Mutability, Store, Trap, Val,
     ValType,
@@ -18,6 +18,8 @@ static START: Once = Once::new();
 const CONTRACT_MAIN: &str = "main";
 const CONTRACT_DEPLOY: &str = "deploy";
 const CONTRACT_HASH_TYPE: &str = "hash_type";
+const BCOS_MODULE_NAME: &str = "bcos";
+const BCOS_GLOBAL_GAS_VAR: &str = "gas";
 
 static WASMTIME_ENGINE: Lazy<Engine> = Lazy::new(|| {
     let mut config = Config::new();
@@ -50,11 +52,29 @@ static WASM_MODULE_CACHE: Lazy<Mutex<lru::LruCache<String, Module>>> = Lazy::new
 // static WASMTIME_LINKER: Lazy<Arc<Mutex<Linker<Arc<Mutex<EnvironmentInterface>>>>>> =
 //     Lazy::new(|| Arc::new(Mutex::new(Linker::new(&WASMTIME_ENGINE))));
 
+#[derive(Debug, Clone)]
+pub enum Error {
+    OutOfGas(String),
+    InvalidParameter(String),
+    VMInternalError(String),
+    InvalidReturnStatus(i32),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::OutOfGas(message) => write!(f, "out of gas, {}", message),
+            Error::InvalidParameter(message) => write!(f, "InvalidParameter, {}", message),
+            Error::VMInternalError(message) => write!(f, "VMInternalError, {}", message),
+            Error::InvalidReturnStatus(code) => write!(f, "InvalidReturnStatus, {}", code),
+        }
+    }
+}
+
+impl error::Error for Error {}
+
 #[evmc_declare::evmc_declare_vm("bcos wasm", "fbwasm", "1.0.0-rc1")]
 pub struct BcosWasm;
-
-const BCOS_MODULE_NAME: &str = "bcos";
-const BCOS_GLOBAL_GAS_VAR: &str = "gas";
 
 fn has_wasm_preamble(data: &[u8]) -> bool {
     data.len() >= 8 && data[0..4] == [0x00, 0x61, 0x73, 0x6d]
