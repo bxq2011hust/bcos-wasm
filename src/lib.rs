@@ -84,7 +84,7 @@ fn has_wasm_version(data: &[u8], version: u8) -> bool {
     data.len() >= 8 && data[4..8] == [version, 0x00, 0x00, 0x00]
 }
 
-fn prepare_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
+fn init_linker_imports(linker: &mut Linker<Arc<Mutex<EnvironmentInterface>>>) {
     linker
         .func_wrap(
             BCOS_MODULE_NAME,
@@ -389,6 +389,11 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let mut start = Instant::now();
         START.call_once(|| {
             env_logger::init();
+            {
+                let mut linker = WASMTIME_LINKER.lock().unwrap();
+                linker.allow_shadowing(true);
+                init_linker_imports(&mut linker);
+            }
             info!("wasm init");
         });
         if !has_wasm_preamble(code) {
@@ -469,36 +474,38 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
             Store::new(&WASMTIME_ENGINE, env_interface.clone());
         // let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
-        let mut linker = WASMTIME_LINKER.lock().unwrap().clone();
+
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
         let global_gas = Global::new(&mut store, ty, Val::I64(gas_limit)).unwrap();
         env_interface
             .lock()
             .unwrap()
             .set_gas_global(global_gas.clone());
-        prepare_imports(&mut linker);
-        // TODO: because the global owned by store is defined, the linker can not used to instantiate many modules
-        linker
-            .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
-            .unwrap();
-        if log_enabled!(Level::Info) {
-            info!(
-                "prepare_imports elapsed: {:?} μs",
-                start.elapsed().as_micros()
-            );
-            start = Instant::now();
-        }
-        let instance = match linker.instantiate(&mut store, &module) {
-            Ok(instance) => instance,
-            Err(e) => {
-                error!("Failed to instantiate wasmtime module: {}", e);
-                return evmc_vm::ExecutionResult::new(
-                    evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
-                    0,
-                    None,
+        let instance;
+        {
+            let mut linker = WASMTIME_LINKER.lock().unwrap();
+            linker
+                .define(BCOS_MODULE_NAME, BCOS_GLOBAL_GAS_VAR, global_gas)
+                .unwrap();
+            if log_enabled!(Level::Info) {
+                info!(
+                    "prepare_imports elapsed: {:?} μs",
+                    start.elapsed().as_micros()
                 );
+                start = Instant::now();
             }
-        };
+            instance = match linker.instantiate(&mut store, &module) {
+                Ok(instance) => instance,
+                Err(e) => {
+                    error!("Failed to instantiate wasmtime module: {}", e);
+                    return evmc_vm::ExecutionResult::new(
+                        evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                        0,
+                        None,
+                    );
+                }
+            };
+        }
         if log_enabled!(Level::Info) {
             info!(
                 "instantiate wasm elapsed: {:?} μs",
