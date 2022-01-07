@@ -383,7 +383,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         &self,
         _revision: evmc_vm::ffi::evmc_revision,
         code: &'a [u8],
-        message: &'a evmc_vm::ExecutionMessage,
+        message: evmc_vm::ExecutionMessage,
         context: Option<&'a mut evmc_vm::ExecutionContext<'a>>,
     ) -> evmc_vm::ExecutionResult {
         let mut start = Instant::now();
@@ -428,6 +428,8 @@ impl evmc_vm::EvmcVm for BcosWasm {
             );
             start = Instant::now();
         }
+        let gas_limit = message.gas();
+        let kind = message.kind();
         let env_interface = Arc::new(Mutex::new(EnvironmentInterface::new(context, message)));
         let module;
         {
@@ -442,7 +444,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 None => {
                     module = match Module::from_binary(&WASMTIME_ENGINE, code) {
                         Ok(module) => {
-                            if message.kind() == evmc_call_kind::EVMC_CREATE {
+                            if kind == evmc_call_kind::EVMC_CREATE {
                                 if !verify_contract(&module) {
                                     return evmc_vm::ExecutionResult::new(
                                         evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
@@ -479,7 +481,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
         // let mut linker = WASMTIME_LINKER.lock().unwrap().clone();
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
-        let global_gas = Global::new(&mut store, ty, Val::I64(message.gas())).unwrap();
+        let global_gas = Global::new(&mut store, ty, Val::I64(gas_limit)).unwrap();
         env_interface
             .lock()
             .unwrap()
@@ -529,7 +531,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         env_interface.lock().unwrap().set_memory(memory.clone());
 
         let mut call_name = String::from(CONTRACT_MAIN);
-        if message.kind() == evmc_call_kind::EVMC_CREATE {
+        if kind == evmc_call_kind::EVMC_CREATE {
             call_name = String::from(CONTRACT_DEPLOY);
             if !verify_contract(&module) {
                 error!("Contract code is not valid");
@@ -580,7 +582,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
             }
         }
         if log_enabled!(Level::Debug) {
-            if message.kind() == evmc_call_kind::EVMC_CREATE {
+            if kind == evmc_call_kind::EVMC_CREATE {
                 debug!("check hash elapsed: {:?} μs", start.elapsed().as_micros());
                 start = Instant::now();
             }
@@ -620,7 +622,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let ret;
         if !env.reverted() {
             let gas_left = env.get_gas_left(&mut store).unwrap();
-            if message.kind() == evmc_call_kind::EVMC_CREATE {
+            if kind == evmc_call_kind::EVMC_CREATE {
                 ret = evmc_vm::ExecutionResult::success(gas_left, Some(code));
             } else {
                 ret = evmc_vm::ExecutionResult::success(gas_left, Some(output));

@@ -9,7 +9,7 @@ use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
 
 pub struct EnvironmentInterface<'a> {
     host_context: &'a mut evmc_vm::ExecutionContext<'a>,
-    message: &'a evmc_vm::ExecutionMessage,
+    message: evmc_vm::ExecutionMessage,
     gas_left: Option<RefCell<Global>>, // use RefCell to avoid mutable
     output: Vec<u8>,
     wasm_memory: Option<Memory>,
@@ -120,7 +120,7 @@ pub trait EnvInterface {
 impl<'a> EnvironmentInterface<'a> {
     pub fn new(
         host_context: &'a mut evmc_vm::ExecutionContext<'a>,
-        message: &'a evmc_vm::ExecutionMessage,
+        message: evmc_vm::ExecutionMessage,
     ) -> Self {
         EnvironmentInterface {
             host_context,
