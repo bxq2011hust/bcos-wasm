@@ -7,8 +7,8 @@ use sha3::Digest;
 use std::cell::RefCell;
 use wasmtime::{AsContext, AsContextMut, Global, Memory, Val};
 
-pub struct EnvironmentInterface<'a> {
-    host_context: &'a mut evmc_vm::ExecutionContext<'a>,
+pub struct EnvironmentInterface {
+    host_context: evmc_vm::ExecutionContext,
     message: evmc_vm::ExecutionMessage,
     gas_left: Option<RefCell<Global>>, // use RefCell to avoid mutable
     output: Vec<u8>,
@@ -17,9 +17,9 @@ pub struct EnvironmentInterface<'a> {
     last_call_return_data: Vec<u8>,
 }
 
-unsafe impl Send for EnvironmentInterface<'_> {}
+unsafe impl Send for EnvironmentInterface {}
 
-unsafe impl Sync for EnvironmentInterface<'_> {}
+unsafe impl Sync for EnvironmentInterface {}
 
 struct GasSchedule;
 
@@ -117,9 +117,9 @@ pub trait EnvInterface {
     ) -> Result<i32, Error>;
 }
 
-impl<'a> EnvironmentInterface<'a> {
+impl EnvironmentInterface {
     pub fn new(
-        host_context: &'a mut evmc_vm::ExecutionContext<'a>,
+        host_context: evmc_vm::ExecutionContext,
         message: evmc_vm::ExecutionMessage,
     ) -> Self {
         EnvironmentInterface {
@@ -296,7 +296,7 @@ impl<'a> EnvironmentInterface<'a> {
     }
 }
 
-impl EnvInterface for EnvironmentInterface<'_> {
+impl EnvInterface for EnvironmentInterface {
     fn finish(
         &mut self,
         store: impl AsContext,

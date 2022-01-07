@@ -49,8 +49,8 @@ static WASM_MODULE_CACHE: Lazy<Mutex<lru::LruCache<String, Module>>> = Lazy::new
     Mutex::new(LruCache::new(capacity))
 });
 
-// static WASMTIME_LINKER: Lazy<Arc<Mutex<Linker<Arc<Mutex<EnvironmentInterface>>>>>> =
-//     Lazy::new(|| Arc::new(Mutex::new(Linker::new(&WASMTIME_ENGINE))));
+static WASMTIME_LINKER: Lazy<Arc<Mutex<Linker<Arc<Mutex<EnvironmentInterface>>>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Linker::new(&WASMTIME_ENGINE))));
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -384,23 +384,13 @@ impl evmc_vm::EvmcVm for BcosWasm {
         _revision: evmc_vm::ffi::evmc_revision,
         code: &'a [u8],
         message: evmc_vm::ExecutionMessage,
-        context: Option<&'a mut evmc_vm::ExecutionContext<'a>>,
+        context: evmc_vm::ExecutionContext,
     ) -> evmc_vm::ExecutionResult {
         let mut start = Instant::now();
         START.call_once(|| {
             env_logger::init();
             info!("wasm init");
         });
-        let context = match context {
-            Some(c) => c,
-            None => {
-                return evmc_vm::ExecutionResult::new(
-                    evmc_status_code::EVMC_INTERNAL_ERROR,
-                    0,
-                    None,
-                );
-            }
-        };
         if !has_wasm_preamble(code) {
             error!("Contract code is not valid wasm code");
             return evmc_vm::ExecutionResult::new(
@@ -478,8 +468,8 @@ impl evmc_vm::EvmcVm for BcosWasm {
         }
         let mut store: Store<Arc<Mutex<EnvironmentInterface>>> =
             Store::new(&WASMTIME_ENGINE, env_interface.clone());
-        let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
-        // let mut linker = WASMTIME_LINKER.lock().unwrap().clone();
+        // let mut linker: Linker<Arc<Mutex<EnvironmentInterface>>> = Linker::new(&WASMTIME_ENGINE);
+        let mut linker = WASMTIME_LINKER.lock().unwrap().clone();
         let ty = GlobalType::new(ValType::I64, Mutability::Var);
         let global_gas = Global::new(&mut store, ty, Val::I64(gas_limit)).unwrap();
         env_interface
