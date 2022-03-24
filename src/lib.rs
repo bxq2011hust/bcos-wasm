@@ -448,7 +448,6 @@ impl evmc_vm::EvmcVm for BcosWasm {
                                     );
                                 }
                             }
-                            modules.put(dest, module.clone());
                             module
                         }
                         Err(e) => {
@@ -618,6 +617,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
         let output = env.get_output();
         let ret;
         if !env.reverted() {
+            WASM_MODULE_CACHE.lock().unwrap().put(dest, module.clone());
             let gas_left = env.get_gas_left(&mut store).unwrap();
             if kind == evmc_call_kind::EVMC_CREATE {
                 ret = evmc_vm::ExecutionResult::success(gas_left, Some(code));
