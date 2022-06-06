@@ -229,6 +229,7 @@ dependencies = [
  "evmc-vm",
  "futures",
  "hex",
+ "libc",
  "log",
  "lru",
  "once_cell",
@@ -679,7 +680,7 @@ checksum = "f7531096570974c3a9dcf9e4b8e1cede1ec26cf5046219fb3b9d897503b9be59"
 [[package]]
 name = "evmc-declare"
 version = "9.0.0"
-source = "git+https://github.com/FISCO-BCOS/evmc?rev=66381c8dd679c11627dbe1bdbcdb8677ae5a4141#66381c8dd679c11627dbe1bdbcdb8677ae5a4141"
+source = "git+https://github.com/FISCO-BCOS/evmc?rev=14d92c1dc612482326daeb1f24fc07c4fd97449c#14d92c1dc612482326daeb1f24fc07c4fd97449c"
 dependencies = [
  "evmc-vm",
  "heck",
@@ -691,7 +692,7 @@ dependencies = [
 [[package]]
 name = "evmc-sys"
 version = "9.0.0"
-source = "git+https://github.com/FISCO-BCOS/evmc?rev=66381c8dd679c11627dbe1bdbcdb8677ae5a4141#66381c8dd679c11627dbe1bdbcdb8677ae5a4141"
+source = "git+https://github.com/FISCO-BCOS/evmc?rev=14d92c1dc612482326daeb1f24fc07c4fd97449c#14d92c1dc612482326daeb1f24fc07c4fd97449c"
 dependencies = [
  "bindgen",
 ]
@@ -699,7 +700,7 @@ dependencies = [
 [[package]]
 name = "evmc-vm"
 version = "9.0.0"
-source = "git+https://github.com/FISCO-BCOS/evmc?rev=66381c8dd679c11627dbe1bdbcdb8677ae5a4141#66381c8dd679c11627dbe1bdbcdb8677ae5a4141"
+source = "git+https://github.com/FISCO-BCOS/evmc?rev=14d92c1dc612482326daeb1f24fc07c4fd97449c#14d92c1dc612482326daeb1f24fc07c4fd97449c"
 dependencies = [
  "evmc-sys",
 ]

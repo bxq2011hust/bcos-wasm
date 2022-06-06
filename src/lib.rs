@@ -439,14 +439,12 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 None => {
                     module = match Module::from_binary(&WASMTIME_ENGINE, code) {
                         Ok(module) => {
-                            if kind == evmc_call_kind::EVMC_CREATE {
-                                if !verify_contract(&module) {
-                                    return evmc_vm::ExecutionResult::new(
-                                        evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
-                                        0,
-                                        None,
-                                    );
-                                }
+                            if kind == evmc_call_kind::EVMC_CREATE && !verify_contract(&module) {
+                                return evmc_vm::ExecutionResult::new(
+                                    evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                                    0,
+                                    None,
+                                );
                             }
                             module
                         }
