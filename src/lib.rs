@@ -372,6 +372,7 @@ fn verify_contract(module: &Module) -> bool {
         error!("can't find contract {} function", CONTRACT_DEPLOY);
         return false;
     }
+    // FIXME: check imports
     true
 }
 
@@ -491,12 +492,23 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 );
                 start = Instant::now();
             }
-            instance = match linker.instantiate(&mut store, &module) {
+            let instance_pre = match linker.instantiate_pre(&mut store, &module) {
+                Ok(i) => i,
+                Err(e) => {
+                    error!("Failed to instantiate_pre wasmtime module: {}", e);
+                    return evmc_vm::ExecutionResult::new(
+                        evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                        0,
+                        None,
+                    );
+                }
+            };
+            instance = match instance_pre.instantiate(&mut store) {
                 Ok(instance) => instance,
                 Err(e) => {
                     error!("Failed to instantiate wasmtime module: {}", e);
                     return evmc_vm::ExecutionResult::new(
-                        evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                        evmc_status_code::EVMC_INTERNAL_ERROR,
                         0,
                         None,
                     );
