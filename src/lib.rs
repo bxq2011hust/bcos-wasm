@@ -503,7 +503,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                     );
                 }
             };
-            instance = match instance_pre.instantiate(&mut store) {
+            instance = match task::block_on(instance_pre.instantiate_async(&mut store)) {
                 Ok(instance) => instance,
                 Err(e) => {
                     error!("Failed to instantiate wasmtime module: {}", e);
