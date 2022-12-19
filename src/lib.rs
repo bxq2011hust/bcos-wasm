@@ -402,6 +402,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
             return evmc_vm::ExecutionResult::new(
                 evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                 0,
+                0,
                 None,
             );
         }
@@ -409,6 +410,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
             error!("Contract has an invalid WebAssembly version {}", code[4]);
             return evmc_vm::ExecutionResult::new(
                 evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                0,
                 0,
                 None,
             );
@@ -444,6 +446,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                                 return evmc_vm::ExecutionResult::new(
                                     evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                                     0,
+                                    0,
                                     None,
                                 );
                             }
@@ -453,6 +456,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                             error!("Failed to compile wasm code to module: {}", e);
                             return evmc_vm::ExecutionResult::new(
                                 evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                                0,
                                 0,
                                 None,
                             );
@@ -499,6 +503,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                     return evmc_vm::ExecutionResult::new(
                         evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                         0,
+                        0,
                         None,
                     );
                 }
@@ -509,6 +514,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                     error!("Failed to instantiate wasmtime module: {}", e);
                     return evmc_vm::ExecutionResult::new(
                         evmc_status_code::EVMC_INTERNAL_ERROR,
+                        0,
                         0,
                         None,
                     );
@@ -530,6 +536,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 return evmc_vm::ExecutionResult::new(
                     evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                     0,
+                    0,
                     None,
                 );
             }
@@ -544,6 +551,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 return evmc_vm::ExecutionResult::new(
                     evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                     0,
+                    0,
                     None,
                 );
             }
@@ -554,6 +562,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                     error!("Failed to get hash function: {}", e);
                     return evmc_vm::ExecutionResult::new(
                         evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                        0,
                         0,
                         None,
                     );
@@ -571,6 +580,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                     return evmc_vm::ExecutionResult::new(
                         evmc_status_code::EVMC_WASM_TRAP,
                         0,
+                        0,
                         None,
                     );
                 }
@@ -582,6 +592,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 );
                 return evmc_vm::ExecutionResult::new(
                     evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
+                    0,
                     0,
                     None,
                 );
@@ -602,6 +613,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
                 return evmc_vm::ExecutionResult::new(
                     evmc_status_code::EVMC_CONTRACT_VALIDATION_FAILURE,
                     0,
+                    0,
                     None,
                 );
             }
@@ -611,7 +623,7 @@ impl evmc_vm::EvmcVm for BcosWasm {
             Ok(ret) => ret,
             Err(e) => {
                 error!("Failed to call {} function: {}", call_name, e);
-                return evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_WASM_TRAP, 0, None);
+                return evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_WASM_TRAP, 0, 0, None);
             }
         };
         if log_enabled!(Level::Info) {
@@ -630,12 +642,12 @@ impl evmc_vm::EvmcVm for BcosWasm {
             WASM_MODULE_CACHE.lock().unwrap().put(dest, module.clone());
             let gas_left = env.get_gas_left(&mut store).unwrap();
             if kind == evmc_call_kind::EVMC_CREATE {
-                ret = evmc_vm::ExecutionResult::success(gas_left, Some(code));
+                ret = evmc_vm::ExecutionResult::success(gas_left, 0, Some(code));
             } else {
-                ret = evmc_vm::ExecutionResult::success(gas_left, Some(output));
+                ret = evmc_vm::ExecutionResult::success(gas_left, 0, Some(output));
             }
         } else {
-            ret = evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_REVERT, 0, Some(output));
+            ret = evmc_vm::ExecutionResult::new(evmc_status_code::EVMC_REVERT, 0, 0, Some(output));
         }
         if log_enabled!(Level::Debug) {
             debug!(

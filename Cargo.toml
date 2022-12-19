@@ -25,8 +25,8 @@ async-std = "1.10.0"
 lru = "0.7.2"
 libc = { version = "0.2", default-features = false }
 # tokio = {version = "1.15.0", features = ["rt","rt-multi-thread"]}
-evmc-declare = { git = "https://github.com/FISCO-BCOS/evmc", rev = "14d92c1dc612482326daeb1f24fc07c4fd97449c"}
-evmc-vm = { git = "https://github.com/FISCO-BCOS/evmc", rev = "14d92c1dc612482326daeb1f24fc07c4fd97449c"}
+evmc-declare = { git = "https://github.com/FISCO-BCOS/evmc", rev = "801fb73ab4f39b8e2d2128fff669d05645166eac"}
+evmc-vm = { git = "https://github.com/FISCO-BCOS/evmc", rev = "801fb73ab4f39b8e2d2128fff669d05645166eac"}
 # evmc-sys = { git = "https://github.com/FISCO-BCOS/evmc", rev = "2e8bc3a6fc9c3cdbf5440b329dcdf0753faee43c"}
 
 [profile.release]

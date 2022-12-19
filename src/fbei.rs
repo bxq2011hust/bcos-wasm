@@ -1,6 +1,6 @@
 use crate::Error;
 use evmc_vm::{
-    Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256,
+    Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256, Address,
 };
 use log::{debug, log_enabled, Level};
 use sha3::Digest;
@@ -603,6 +603,8 @@ impl EnvInterface for EnvironmentInterface {
             },
             Uint256 { bytes: [0u8; 32] },
             Bytes32::default(),
+            // wasm not support delegate call, so set code_address to default
+            Address::default(),
         );
         self.take_gas(&mut store, gas_left)?;
         let result = self.host_context.call(&message);
