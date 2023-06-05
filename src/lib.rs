@@ -58,6 +58,7 @@ pub enum Error {
     InvalidParameter(String),
     VMInternalError(String),
     InvalidReturnStatus(i32),
+    Revert(String),
 }
 
 impl fmt::Display for Error {
@@ -67,6 +68,7 @@ impl fmt::Display for Error {
             Error::InvalidParameter(message) => write!(f, "InvalidParameter, {}", message),
             Error::VMInternalError(message) => write!(f, "VMInternalError, {}", message),
             Error::InvalidReturnStatus(code) => write!(f, "InvalidReturnStatus, {}", code),
+            Error::Revert(message) => write!(f, "Revert, {}", message),
         }
     }
 }

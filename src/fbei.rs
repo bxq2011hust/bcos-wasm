@@ -1,6 +1,7 @@
 use crate::Error;
 use evmc_vm::{
-    Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus, Uint256, Address,
+    Address, Bytes32, ExecutionMessage, MessageFlags, MessageKind, StatusCode, StorageStatus,
+    Uint256,
 };
 use log::{debug, log_enabled, Level};
 use sha3::Digest;
@@ -329,7 +330,11 @@ impl EnvInterface for EnvironmentInterface {
         let caller = "revert";
         match &self.wasm_memory {
             Some(wasm_memory) => {
-                wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
+                if self.host_context.get_host_context().version >= 0x03040000 {
+                    Err(Error::Revert(String::from_utf8_lossy(buffer).to_string()))
+                } else {
+                    wasm_memory_read(wasm_memory, &store, data_offset as usize, buffer, caller)
+                }
             }
             None => Err(Error::VMInternalError(format!(
                 "{} failed, no wasm_memory",
