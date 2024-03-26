@@ -741,8 +741,8 @@ dependencies = [
 
 [[package]]
 name = "evmc-declare"
-version = "10.1.0"
-source = "git+https://github.com/FISCO-BCOS/evmc?rev=94c2b3fcd2d41db4a96600867634f4de700a3962#94c2b3fcd2d41db4a96600867634f4de700a3962"
+version = "11.0.1"
+source = "git+https://github.com/FISCO-BCOS/evmc?rev=b2986bdd68ddf9f35c3ae889c5bee8b643ecb4bd#b2986bdd68ddf9f35c3ae889c5bee8b643ecb4bd"
 dependencies = [
  "evmc-vm",
  "heck",
@@ -753,16 +753,16 @@ dependencies = [
 
 [[package]]
 name = "evmc-sys"
-version = "10.1.0"
-source = "git+https://github.com/FISCO-BCOS/evmc?rev=94c2b3fcd2d41db4a96600867634f4de700a3962#94c2b3fcd2d41db4a96600867634f4de700a3962"
+version = "11.0.1"
+source = "git+https://github.com/FISCO-BCOS/evmc?rev=b2986bdd68ddf9f35c3ae889c5bee8b643ecb4bd#b2986bdd68ddf9f35c3ae889c5bee8b643ecb4bd"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "evmc-vm"
-version = "10.1.0"
-source = "git+https://github.com/FISCO-BCOS/evmc?rev=94c2b3fcd2d41db4a96600867634f4de700a3962#94c2b3fcd2d41db4a96600867634f4de700a3962"
+version = "11.0.1"
+source = "git+https://github.com/FISCO-BCOS/evmc?rev=b2986bdd68ddf9f35c3ae889c5bee8b643ecb4bd#b2986bdd68ddf9f35c3ae889c5bee8b643ecb4bd"
 dependencies = [
  "evmc-sys",
 ]
